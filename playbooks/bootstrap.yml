@@ -1,0 +1,46 @@
+---
+- name: Bootstrap Linux managed servers
+  hosts: allservers
+  become: true
+  gather_facts: true
+
+  tasks:
+
+    - name: Display managed host information
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "IP: {{ ansible_default_ipv4.address }}"
+
+    - name: Install common packages
+      ansible.builtin.dnf:
+        name: "{{ common_packages }}"
+        state: present
+
+    - name: Install chrony
+      ansible.builtin.dnf:
+        name: chrony
+        state: present
+
+    - name: Enable and start chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Create devops user
+      ansible.builtin.user:
+        name: "{{ devops_user }}"
+        groups: wheel
+        append: true
+        create_home: true
+        shell: /bin/bash
+        state: present
+
+    - name: Configure timezone using timedatectl
+      ansible.builtin.command:
+        cmd: "timedatectl set-timezone {{ timezone }}"
+      when:
+        - ansible_date_time.tz != "CST"
+      changed_when: false

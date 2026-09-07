@@ -1,0 +1,13 @@
+---
+timezone: Asia/Shanghai
+
+common_packages:
+  - vim
+  - wget
+  - curl
+  - bash-completion
+  - net-tools
+  - tar
+  - unzip
+
+devops_user: devops

@@ -1,0 +1,5 @@
+roles/prometheus/files/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+roles/node_exporter/files/*.tar.gz filter=lfs diff=lfs merge=lfs -text
+roles/promtail/files/*.zip filter=lfs diff=lfs merge=lfs -text
+roles/promtail/files/promtail-linux-amd64 filter=lfs diff=lfs merge=lfs -text
+roles/loki/files/loki-linux-amd64 filter=lfs diff=lfs merge=lfs -text
