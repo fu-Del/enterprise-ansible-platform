@@ -1,13 +1,4 @@
 ---
-timezone: Asia/Shanghai
+environment_name: production
 
-common_packages:
-  - vim
-  - wget
-  - curl
-  - bash-completion
-  - net-tools
-  - tar
-  - unzip
-
-devops_user: devops
+company_name: Ansible Enterprise Lab

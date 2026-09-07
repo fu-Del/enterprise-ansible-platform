@@ -1,0 +1,16 @@
+---
+- name: Deploy common sysctl configuration
+  ansible.builtin.template:
+    src: 99-ansible-sysctl.conf.j2
+    dest: /etc/sysctl.d/99-ansible.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: common_sysctl_config
+
+
+- name: Apply sysctl parameters
+  ansible.builtin.command:
+    cmd: sysctl --system
+  when:
+    - common_sysctl_config.changed

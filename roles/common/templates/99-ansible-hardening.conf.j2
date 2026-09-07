@@ -1,0 +1,17 @@
+# Managed by Ansible
+
+PubkeyAuthentication {{ ssh_pubkey_authentication }}
+
+PermitRootLogin {{ ssh_permit_root_login }}
+
+PasswordAuthentication {{ ssh_password_authentication }}
+
+MaxAuthTries 5
+
+LoginGraceTime 60
+
+ClientAliveInterval 300
+
+ClientAliveCountMax 2
+
+X11Forwarding no

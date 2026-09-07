@@ -1,0 +1,37 @@
+---
+- name: Create devops user
+  ansible.builtin.user:
+    name: "{{ devops_user }}"
+    groups: "{{ devops_group }}"
+    append: true
+    shell: "{{ devops_shell }}"
+    create_home: true
+    state: present
+
+
+- name: Create devops SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ devops_user }}/.ssh"
+    state: directory
+    owner: "{{ devops_user }}"
+    group: "{{ devops_user }}"
+    mode: "0700"
+
+
+- name: Install devops authorized key
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.file', devops_public_key_file) }}\n"
+    dest: "/home/{{ devops_user }}/.ssh/authorized_keys"
+    owner: "{{ devops_user }}"
+    group: "{{ devops_user }}"
+    mode: "0600"
+
+
+- name: Configure sudo privileges
+  ansible.builtin.copy:
+    content: "{{ devops_user }} ALL=(ALL) NOPASSWD: ALL\n"
+    dest: "/etc/sudoers.d/{{ devops_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "/usr/sbin/visudo -cf %s"

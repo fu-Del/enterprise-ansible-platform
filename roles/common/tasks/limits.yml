@@ -1,0 +1,10 @@
+---
+- name: Configure file descriptor limits
+  ansible.builtin.copy:
+    content: |
+      * soft nofile {{ common_nofile_soft }}
+      * hard nofile {{ common_nofile_hard }}
+    dest: /etc/security/limits.d/99-ansible.conf
+    owner: root
+    group: root
+    mode: "0644"

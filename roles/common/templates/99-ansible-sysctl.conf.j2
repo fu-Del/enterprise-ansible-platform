@@ -1,0 +1,7 @@
+# Managed by Ansible
+
+fs.file-max = {{ common_file_max }}
+
+net.core.somaxconn = {{ common_somaxconn }}
+
+net.ipv4.tcp_syncookies = {{ common_tcp_syncookies }}

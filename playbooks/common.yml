@@ -1,0 +1,8 @@
+---
+- name: Apply enterprise common configuration
+  hosts: allservers
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: common

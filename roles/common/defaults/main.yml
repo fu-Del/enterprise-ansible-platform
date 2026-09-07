@@ -1,0 +1,62 @@
+---
+# defaults file for roles/common
+# ==========================
+# Common packages
+# ==========================
+
+common_packages:
+  - vim-enhanced
+  - wget
+  - curl
+  - bash-completion
+  - net-tools
+  - tar
+  - unzip
+  - rsync
+  - chrony
+
+
+# ==========================
+# Timezone
+# ==========================
+
+common_timezone: Asia/Shanghai
+
+
+# ==========================
+# DevOps user
+# ==========================
+
+devops_user: devops
+devops_group: wheel
+devops_shell: /bin/bash
+
+devops_public_key_file: /root/.ssh/id_ed25519.pub
+
+
+# ==========================
+# Limits
+# ==========================
+
+common_nofile_soft: 65535
+common_nofile_hard: 65535
+
+
+# ==========================
+# SSH
+# ==========================
+
+ssh_pubkey_authentication: "yes"
+
+# 第二阶段前半段暂时保持 yes
+ssh_permit_root_login: "no"
+ssh_password_authentication: "no"
+
+
+# ==========================
+# Common sysctl
+# ==========================
+
+common_file_max: 2097152
+common_somaxconn: 4096
+common_tcp_syncookies: 1

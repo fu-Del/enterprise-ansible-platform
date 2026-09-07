@@ -1,0 +1,26 @@
+
+# tasks file for roles/common
+---
+- name: Configure common packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Configure timezone
+  ansible.builtin.import_tasks: timezone.yml
+
+- name: Configure chrony
+  ansible.builtin.import_tasks: chrony.yml
+
+- name: Configure operation user
+  ansible.builtin.import_tasks: users.yml
+
+- name: Configure resource limits
+  ansible.builtin.import_tasks: limits.yml
+
+- name: Configure sysctl
+  ansible.builtin.import_tasks: sysctl.yml
+
+- name: Configure SSH
+  ansible.builtin.import_tasks: ssh.yml
+
+- name: Configure login banner
+  ansible.builtin.import_tasks: banner.yml

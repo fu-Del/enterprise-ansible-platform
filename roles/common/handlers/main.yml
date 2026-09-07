@@ -1,0 +1,13 @@
+---
+# handlers file for roles/common
+
+- name: Restart chronyd
+  ansible.builtin.service:
+    name: chronyd
+    state: restarted
+
+
+- name: Reload sshd
+  ansible.builtin.service:
+    name: sshd
+    state: reloaded
