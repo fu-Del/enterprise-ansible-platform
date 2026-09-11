@@ -1,0 +1,76 @@
+---
+- name: Configure Kubernetes Worker backup client
+  hosts: node04
+  become: true
+  gather_facts: true
+
+  vars:
+    control_plane_kubeconfig: >-
+      {{ hostvars['node03']['k8s_backup_kubeconfig']
+         | default('/etc/kubernetes/admin.conf') }}
+
+  pre_tasks:
+    - name: Check node04 Ready status from node03
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - "--kubeconfig={{ control_plane_kubeconfig }}"
+          - get
+          - node
+          - "{{ inventory_hostname }}"
+          - -o
+          - "jsonpath={.status.conditions[?(@.type=='Ready')].status}"
+      delegate_to: node03
+      register: worker_ready_status
+      changed_when: false
+      check_mode: false
+    - name: Verify node04 is Ready
+      ansible.builtin.assert:
+        that:
+          - worker_ready_status.stdout | trim == "True"
+        fail_msg: "node04 is not Ready; Worker backup deployment stopped"
+        success_msg: "node04 is Ready"
+
+  roles:
+    - backup_client
+
+- name: Authorize node04 backup client on node06
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  vars:
+    node04_backup_key_path: >-
+      {{ hostvars['node04']['backup_ssh_key_path'] }}.pub
+    node04_backup_target_dir: >-
+      {{ hostvars['node04']['backup_server_base_dir'] }}/{{ hostvars['node04']['backup_client_node_name'] }}
+
+  tasks:
+    - name: Read node04 backup public key
+      ansible.builtin.slurp:
+        src: "{{ node04_backup_key_path }}"
+      delegate_to: node04
+      register: node04_backup_public_key
+
+    - name: Ensure node04 backup target directory exists
+      ansible.builtin.file:
+        path: "{{ node04_backup_target_dir }}"
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0750"
+
+    - name: Ensure backupsvc SSH directory exists
+      ansible.builtin.file:
+        path: /home/backupsvc/.ssh
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0700"
+
+    - name: Authorize node04 backup public key
+      ansible.posix.authorized_key:
+        user: backupsvc
+        key: "{{ node04_backup_public_key.content | b64decode | trim }}"
+        state: present
+        exclusive: false

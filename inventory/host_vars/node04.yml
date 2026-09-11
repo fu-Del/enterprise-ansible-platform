@@ -1,0 +1,35 @@
+# ============================================================
+# Kubernetes Worker Backup - node04
+# ============================================================
+
+backup_k8s_worker_enabled: true
+
+backup_server_host: "192.168.11.16"
+backup_server_user: "backupsvc"
+backup_server_base_dir: "/backup/data"
+
+backup_client_node_name: "node04"
+
+backup_work_dir: "/var/lib/backup-client"
+backup_log_dir: "/var/log/backup-client"
+backup_ssh_key_path: "/root/.ssh/backup_ed25519"
+
+backup_retention_local_days: 2
+
+k8s_worker_backup_paths:
+  - /etc/kubernetes
+  - /etc/containerd
+  - /etc/cni
+  - /etc/crictl.yaml
+  - /var/lib/kubelet/config.yaml
+  - /var/lib/kubelet/kubeadm-flags.env
+  - /var/lib/kubelet/pki
+  - /etc/systemd/system/containerd.service.d
+  - /etc/systemd/system/kubelet.service.d
+
+# 如果以后使用hostPath或Local PV，在这里增加真实数据目录。
+# 添加前应先确认应用备份一致性。
+k8s_worker_persistent_data_paths: []
+
+k8s_worker_backup_cron_hour: "3"
+k8s_worker_backup_cron_minute: "0"

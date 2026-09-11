@@ -1,0 +1,51 @@
+---
+# =========================================
+# MariaDB packages / service
+# =========================================
+
+mysql_server_package: mariadb-server
+mysql_client_package: mariadb
+mysql_python_package: python3-PyMySQL
+
+mysql_service_name: mariadb
+
+# =========================================
+# Network
+# =========================================
+
+mysql_port: 3306
+mysql_bind_address: "0.0.0.0"
+
+# =========================================
+# Storage
+# =========================================
+
+mysql_data_dir: /var/lib/mysql
+mysql_backup_dir: /data/mysql-backup
+
+# =========================================
+# Character set
+# =========================================
+
+mysql_character_set: utf8mb4
+mysql_collation: utf8mb4_unicode_ci
+
+# =========================================
+# Performance baseline
+# 2G RAM lab node: keep conservative
+# =========================================
+
+mysql_max_connections: 150
+mysql_innodb_buffer_pool_size: 512M
+mysql_socket: /var/lib/mysql/mysql.sock
+  # login_unix_socket: "{{ mysql_socket }}"
+# =========================================
+# Databases
+# =========================================
+
+mysql_databases:
+  - web_db
+  - app_db
+  - automation_db
+  - monitor_meta_db
+  - backup_meta_db

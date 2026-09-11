@@ -1,0 +1,302 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+umask 077
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+NODE="{{ backup_client_node_name }}"
+BACKUP_SERVER="{{ backup_server_host }}"
+BACKUP_USER="{{ backup_server_user }}"
+BACKUP_BASE="{{ backup_server_base_dir }}"
+
+WORK_DIR="{{ backup_work_dir }}"
+LOG_DIR="{{ backup_log_dir }}"
+SSH_KEY="{{ backup_ssh_key_path }}"
+KUBECONFIG="{{ k8s_backup_kubeconfig }}"
+LOCAL_RETENTION_DAYS="{{ backup_retention_local_days }}"
+
+DATE="$(date '+%F')"
+TIME="$(date '+%H%M%S')"
+RUN_ID="${DATE}-${TIME}-$$"
+
+RUN_DIR="${WORK_DIR}/k8s-${RUN_ID}"
+METADATA_DIR="${RUN_DIR}/metadata"
+REMOTE_DIR="${BACKUP_BASE}/${NODE}/${DATE}"
+LOG_FILE="${LOG_DIR}/k8s-controlplane-backup.log"
+
+SNAPSHOT="etcd-${NODE}-${DATE}-${TIME}.db"
+CONFIG_ARCHIVE="${NODE}-kubernetes-config-${DATE}-${TIME}.tar.gz"
+METADATA_ARCHIVE="${NODE}-kubernetes-metadata-${DATE}-${TIME}.tar.gz"
+
+ETCD_HOST_SNAPSHOT="/var/lib/etcd/${SNAPSHOT}"
+
+SSH_OPTIONS=(
+  -i "${SSH_KEY}"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=15
+)
+
+cleanup()
+{
+    local rc=$?
+
+    rm -f -- "${ETCD_HOST_SNAPSHOT}"
+
+    if [ "${rc}" -ne 0 ]; then
+        echo "ERROR: backup failed with exit code ${rc}"
+        echo "Failure time: $(date '+%F %T')"
+    fi
+
+    trap - EXIT
+    exit "${rc}"
+}
+
+trap cleanup EXIT
+trap 'echo "ERROR: line ${LINENO}: ${BASH_COMMAND}"' ERR
+
+mkdir -p "${WORK_DIR}" "${LOG_DIR}" "${RUN_DIR}" "${METADATA_DIR}"
+exec >>"${LOG_FILE}" 2>&1
+
+echo
+echo "============================================================"
+echo "Kubernetes Control Plane Backup"
+echo "============================================================"
+echo "Start time : $(date '+%F %T')"
+echo "Node       : ${NODE}"
+echo "Run dir    : ${RUN_DIR}"
+echo "Remote     : ${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}"
+echo "============================================================"
+
+for command_name in kubectl ssh rsync tar sha256sum find
+do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+        echo "ERROR: required command is missing: ${command_name}"
+        exit 1
+    fi
+done
+
+if [ ! -r "${KUBECONFIG}" ]; then
+    echo "ERROR: kubeconfig is not readable: ${KUBECONFIG}"
+    exit 1
+fi
+
+if [ ! -r "${SSH_KEY}" ]; then
+    echo "ERROR: SSH private key is not readable: ${SSH_KEY}"
+    exit 1
+fi
+
+echo "[1/10] Checking Kubernetes API..."
+
+if [ "$(kubectl --kubeconfig="${KUBECONFIG}" get --raw=/readyz)" != "ok" ]; then
+    echo "ERROR: Kubernetes API is not ready"
+    exit 1
+fi
+
+echo "Kubernetes API: OK"
+
+echo "[2/10] Finding etcd Pod..."
+
+ETCD_POD="$(
+    kubectl \
+      --kubeconfig="${KUBECONFIG}" \
+      -n kube-system \
+      get pods \
+      -l component=etcd \
+      -o jsonpath='{.items[0].metadata.name}'
+)"
+
+if [ -z "${ETCD_POD}" ]; then
+    echo "ERROR: etcd Pod was not found"
+    exit 1
+fi
+
+echo "etcd Pod: ${ETCD_POD}"
+
+echo "[3/10] Checking etcd endpoint health..."
+
+kubectl \
+  --kubeconfig="${KUBECONFIG}" \
+  -n kube-system \
+  exec "${ETCD_POD}" -- \
+  etcdctl \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+    --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+    endpoint health
+
+echo "[4/10] Creating etcd snapshot..."
+
+rm -f -- "${ETCD_HOST_SNAPSHOT}"
+
+kubectl \
+  --kubeconfig="${KUBECONFIG}" \
+  -n kube-system \
+  exec "${ETCD_POD}" -- \
+  etcdctl \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+    --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+    snapshot save "/var/lib/etcd/${SNAPSHOT}"
+
+if [ ! -s "${ETCD_HOST_SNAPSHOT}" ]; then
+    echo "ERROR: etcd snapshot is missing or empty"
+    exit 1
+fi
+
+install \
+  -o root \
+  -g root \
+  -m 0600 \
+  "${ETCD_HOST_SNAPSHOT}" \
+  "${RUN_DIR}/${SNAPSHOT}"
+
+ls -lh "${RUN_DIR}/${SNAPSHOT}"
+
+echo "[5/10] Collecting Kubernetes metadata..."
+
+kubectl --kubeconfig="${KUBECONFIG}" get nodes -o wide \
+  >"${METADATA_DIR}/nodes.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get pods -A -o wide \
+  >"${METADATA_DIR}/pods.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get deployments -A -o wide \
+  >"${METADATA_DIR}/deployments.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get daemonsets -A -o wide \
+  >"${METADATA_DIR}/daemonsets.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get services -A -o wide \
+  >"${METADATA_DIR}/services.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get namespaces \
+  >"${METADATA_DIR}/namespaces.txt"
+
+kubectl --kubeconfig="${KUBECONFIG}" get storageclass \
+  >"${METADATA_DIR}/storageclasses.txt" 2>&1 || true
+
+kubectl --kubeconfig="${KUBECONFIG}" get pv \
+  >"${METADATA_DIR}/persistent-volumes.txt" 2>&1 || true
+
+kubectl --kubeconfig="${KUBECONFIG}" get pvc -A \
+  >"${METADATA_DIR}/persistent-volume-claims.txt" 2>&1 || true
+
+kubectl --kubeconfig="${KUBECONFIG}" cluster-info \
+  >"${METADATA_DIR}/cluster-info.txt" 2>&1 || true
+
+kubectl --kubeconfig="${KUBECONFIG}" version \
+  >"${METADATA_DIR}/kubernetes-version.txt" 2>&1 || true
+
+kubeadm version \
+  >"${METADATA_DIR}/kubeadm-version.txt" 2>&1 || true
+
+containerd --version \
+  >"${METADATA_DIR}/containerd-version.txt" 2>&1 || true
+
+uname -a >"${METADATA_DIR}/kernel.txt"
+
+echo "[6/10] Creating Kubernetes configuration archive..."
+
+BACKUP_PATHS=()
+BACKUP_PATH_COUNT=0
+
+{% for path in k8s_backup_paths %}
+if [ -e "{{ path }}" ]; then
+    BACKUP_PATHS+=("{{ path | regex_replace('^/', '') }}")
+    BACKUP_PATH_COUNT=$((BACKUP_PATH_COUNT + 1))
+else
+    echo "WARNING: skipping missing path: {{ path }}"
+fi
+{% endfor %}
+
+if [ "${BACKUP_PATH_COUNT}" -eq 0 ]; then
+    echo "ERROR: none of the configured backup paths exist"
+    exit 1
+fi
+
+tar \
+  --acls \
+  --xattrs \
+  --selinux \
+  --numeric-owner \
+  --warning=no-file-changed \
+  -C / \
+  -czf "${RUN_DIR}/${CONFIG_ARCHIVE}" \
+  "${BACKUP_PATHS[@]}"
+
+if [ ! -s "${RUN_DIR}/${CONFIG_ARCHIVE}" ]; then
+    echo "ERROR: Kubernetes configuration archive is empty"
+    exit 1
+fi
+
+echo "[7/10] Creating metadata archive and checksums..."
+
+tar \
+  -C "${RUN_DIR}" \
+  -czf "${RUN_DIR}/${METADATA_ARCHIVE}" \
+  metadata
+
+cd "${RUN_DIR}"
+
+sha256sum "${SNAPSHOT}" \
+  >"${SNAPSHOT}.sha256"
+
+sha256sum "${CONFIG_ARCHIVE}" \
+  >"${CONFIG_ARCHIVE}.sha256"
+
+sha256sum "${METADATA_ARCHIVE}" \
+  >"${METADATA_ARCHIVE}.sha256"
+
+sha256sum -c "${SNAPSHOT}.sha256"
+sha256sum -c "${CONFIG_ARCHIVE}.sha256"
+sha256sum -c "${METADATA_ARCHIVE}.sha256"
+
+echo "[8/10] Creating remote backup directory..."
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "mkdir -p -- '${REMOTE_DIR}'"
+
+echo "[9/10] Uploading and verifying backup..."
+
+rsync \
+  -a \
+  -e "ssh -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
+  "${SNAPSHOT}" \
+  "${SNAPSHOT}.sha256" \
+  "${CONFIG_ARCHIVE}" \
+  "${CONFIG_ARCHIVE}.sha256" \
+  "${METADATA_ARCHIVE}" \
+  "${METADATA_ARCHIVE}.sha256" \
+  "${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}/"
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "cd '${REMOTE_DIR}' &&
+   sha256sum -c '${SNAPSHOT}.sha256' &&
+   sha256sum -c '${CONFIG_ARCHIVE}.sha256' &&
+   sha256sum -c '${METADATA_ARCHIVE}.sha256'"
+
+echo "[10/10] Cleaning expired local backup directories..."
+
+find "${WORK_DIR}" \
+  -mindepth 1 \
+  -maxdepth 1 \
+  -type d \
+  -name 'k8s-*' \
+  -mtime "+${LOCAL_RETENTION_DAYS}" \
+  -exec rm -rf -- {} +
+
+echo "============================================================"
+echo "Kubernetes Control Plane backup completed successfully"
+echo "Finish time : $(date '+%F %T')"
+echo "Snapshot    : ${SNAPSHOT}"
+echo "Config      : ${CONFIG_ARCHIVE}"
+echo "Metadata    : ${METADATA_ARCHIVE}"
+echo "Remote      : ${REMOTE_DIR}"
+echo "============================================================"

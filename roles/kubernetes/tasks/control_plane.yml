@@ -1,0 +1,34 @@
+---
+- name: Check whether Kubernetes control plane is initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubernetes_admin_conf
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command:
+    cmd: >
+      kubeadm init
+      --apiserver-advertise-address={{ kubernetes_api_address }}
+      --pod-network-cidr={{ kubernetes_pod_cidr }}
+      --service-cidr={{ kubernetes_service_cidr }}
+      --cri-socket=unix:///run/containerd/containerd.sock
+  when:
+    - not kubernetes_admin_conf.stat.exists
+  register: kubeadm_init_result
+
+- name: Create kubeconfig directory for devops
+  ansible.builtin.file:
+    path: /home/devops/.kube
+    state: directory
+    owner: devops
+    group: devops
+    mode: "0700"
+
+- name: Copy Kubernetes admin kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/devops/.kube/config
+    remote_src: true
+    owner: devops
+    group: devops
+    mode: "0600"

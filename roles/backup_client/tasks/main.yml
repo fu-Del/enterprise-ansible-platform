@@ -1,0 +1,55 @@
+---
+- name: Install backup client packages
+  ansible.builtin.dnf:
+    name:
+      - rsync
+      - tar
+      - gzip
+      - openssh-clients
+      - util-linux
+    state: present
+
+- name: Create backup working directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ backup_work_dir }}"
+    - "{{ backup_log_dir }}"
+
+- name: Include SSH backup configuration
+  ansible.builtin.include_tasks: ssh.yml
+
+- name: Include Nginx backup tasks
+  ansible.builtin.include_tasks: nginx.yml
+  when:
+    - inventory_hostname in groups.get('web', [])
+
+- name: Include MariaDB backup tasks
+  ansible.builtin.include_tasks: mariadb.yml
+  when:
+    - inventory_hostname in groups.get('database', [])
+
+- name: Include Kubernetes Control Plane backup tasks
+  ansible.builtin.include_tasks: k8s-controlplane.yml
+  when:
+    - backup_k8s_control_plane_enabled | default(false) | bool
+# ============================================================
+# Kubernetes Worker Backup
+# ============================================================
+
+- name: Include Kubernetes Worker backup tasks
+  ansible.builtin.include_tasks: k8s-worker.yml
+  when:
+    - backup_k8s_worker_enabled | default(false) | bool
+# ============================================================
+# Monitoring and Logging Platform Backup
+# ============================================================
+
+- name: Include monitoring platform backup tasks
+  ansible.builtin.include_tasks: monitoring-platform.yml
+  when:
+    - backup_monitoring_platform_enabled | default(false) | bool

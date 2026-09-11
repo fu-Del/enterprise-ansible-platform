@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -euo pipefail
+
+BACKUP_ROOT="{{ backup_root }}"
+LOG_FILE="{{ backup_log_dir }}/cleanup.log"
+
+exec >> "${LOG_FILE}" 2>&1
+
+echo "========================================"
+echo "Cleanup started: $(date '+%F %T')"
+
+if [ ! -d "${BACKUP_ROOT}" ]; then
+    echo "Backup root not found: ${BACKUP_ROOT}"
+    exit 1
+fi
+
+echo "Cleaning temporary files older than 7 days..."
+
+find "{{ backup_tmp_dir }}" \
+    -type f \
+    -mtime +7 \
+    -delete
+
+echo "Cleanup completed: $(date '+%F %T')"
+echo

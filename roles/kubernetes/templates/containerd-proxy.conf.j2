@@ -1,0 +1,4 @@
+[Service]
+Environment="HTTP_PROXY={{ kubernetes_proxy_url }}"
+Environment="HTTPS_PROXY={{ kubernetes_proxy_url }}"
+Environment="NO_PROXY={{ kubernetes_no_proxy | replace('\n', '') }}"

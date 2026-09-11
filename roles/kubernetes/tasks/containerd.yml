@@ -1,0 +1,50 @@
+---
+- name: Install containerd
+  ansible.builtin.dnf:
+    name:
+      - containerd
+      - container-selinux
+    state: present
+
+- name: Create containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Deploy containerd configuration
+  ansible.builtin.template:
+    src: containerd-config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart containerd
+
+- name: Create containerd systemd override directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/containerd.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure containerd proxy
+  ansible.builtin.template:
+    src: containerd-proxy.conf.j2
+    dest: /etc/systemd/system/containerd.service.d/proxy.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart containerd
+
+- name: Enable and start containerd
+  ansible.builtin.service:
+    name: containerd
+    state: started
+    enabled: true

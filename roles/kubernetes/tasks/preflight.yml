@@ -1,0 +1,40 @@
+---
+- name: Verify SELinux is enforcing
+  ansible.builtin.command:
+    cmd: getenforce
+  register: k8s_selinux
+  changed_when: false
+  check_mode: false
+
+- name: Assert SELinux enforcing
+  ansible.builtin.assert:
+    that:
+      - k8s_selinux.stdout == "Enforcing"
+    fail_msg: SELinux must remain Enforcing.
+    success_msg: SELinux is Enforcing.
+
+- name: Get CPU count
+  ansible.builtin.command:
+    cmd: nproc
+  register: k8s_cpu_count
+  changed_when: false
+  check_mode: false
+- name: Verify control plane CPU requirement
+  ansible.builtin.assert:
+    that:
+      - k8s_cpu_count.stdout | int >= 2
+    fail_msg: "Control plane requires at least 2 CPUs."
+  when:
+    - inventory_hostname in groups['k8s_master']
+
+- name: Verify minimum memory
+  ansible.builtin.assert:
+    that:
+      - ansible_memtotal_mb >= 1800
+    fail_msg: "Kubernetes node requires approximately 2GB RAM or more."
+
+- name: Verify unique hostname
+  ansible.builtin.assert:
+    that:
+      - ansible_hostname == inventory_hostname
+    fail_msg: "Hostname and inventory hostname do not match."

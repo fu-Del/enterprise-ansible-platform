@@ -1,0 +1,26 @@
+---
+- name: Check kubeadm installation
+  ansible.builtin.stat:
+    path: /usr/bin/kubeadm
+  register: kubeadm_binary
+
+- name: Install Kubernetes packages
+  ansible.builtin.command:
+    cmd: >
+      dnf install -y
+      kubelet kubeadm kubectl
+      --setopt=disable_excludes=kubernetes
+      --setopt=timeout=300
+      --setopt=minrate=1
+      --setopt=retries=10
+  register: kubernetes_package_install
+  retries: 3
+  delay: 15
+  until: kubernetes_package_install.rc == 0
+  when:
+    - not kubeadm_binary.stat.exists
+
+- name: Enable kubelet
+  ansible.builtin.service:
+    name: kubelet
+    enabled: true

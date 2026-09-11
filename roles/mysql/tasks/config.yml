@@ -1,0 +1,19 @@
+---
+- name: Deploy MariaDB server configuration
+  ansible.builtin.template:
+    src: server.cnf.j2
+    dest: /etc/my.cnf.d/99-ansible-server.cnf
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  notify:
+    - Restart mariadb
+
+- name: Create MariaDB backup staging directory
+  ansible.builtin.file:
+    path: "{{ mysql_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

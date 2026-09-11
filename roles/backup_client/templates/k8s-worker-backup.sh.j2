@@ -1,0 +1,246 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+umask 077
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+NODE="{{ backup_client_node_name }}"
+
+BACKUP_SERVER="{{ backup_server_host }}"
+BACKUP_USER="{{ backup_server_user }}"
+BACKUP_BASE="{{ backup_server_base_dir }}"
+
+WORK_DIR="{{ backup_work_dir }}"
+LOG_DIR="{{ backup_log_dir }}"
+SSH_KEY="{{ backup_ssh_key_path }}"
+LOCAL_RETENTION_DAYS="{{ backup_retention_local_days }}"
+
+DATE="$(date '+%F')"
+TIME="$(date '+%H%M%S')"
+RUN_ID="${DATE}-${TIME}-$$"
+
+RUN_DIR="${WORK_DIR}/worker-${RUN_ID}"
+METADATA_DIR="${RUN_DIR}/metadata"
+REMOTE_DIR="${BACKUP_BASE}/${NODE}/${DATE}"
+LOG_FILE="${LOG_DIR}/k8s-worker-backup.log"
+
+CONFIG_ARCHIVE="${NODE}-k8s-worker-config-${DATE}-${TIME}.tar.gz"
+METADATA_ARCHIVE="${NODE}-k8s-worker-metadata-${DATE}-${TIME}.tar.gz"
+
+SSH_OPTIONS=(
+  -i "${SSH_KEY}"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=15
+)
+
+cleanup()
+{
+    local rc=$?
+
+    if [ "${rc}" -ne 0 ]; then
+        echo "ERROR: Worker backup failed with exit code ${rc}"
+        echo "Failure time: $(date '+%F %T')"
+    fi
+
+    trap - EXIT
+    exit "${rc}"
+}
+
+trap cleanup EXIT
+trap 'echo "ERROR: line ${LINENO}: ${BASH_COMMAND}"' ERR
+
+mkdir -p "${WORK_DIR}" "${LOG_DIR}" "${RUN_DIR}" "${METADATA_DIR}"
+exec >>"${LOG_FILE}" 2>&1
+
+echo
+echo "============================================================"
+echo "Kubernetes Worker Backup"
+echo "============================================================"
+echo "Start time : $(date '+%F %T')"
+echo "Node       : ${NODE}"
+echo "Run dir    : ${RUN_DIR}"
+echo "Remote     : ${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}"
+echo "============================================================"
+
+for command_name in ssh rsync tar sha256sum find systemctl journalctl
+do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+        echo "ERROR: required command is missing: ${command_name}"
+        exit 1
+    fi
+done
+
+if [ ! -r "${SSH_KEY}" ]; then
+    echo "ERROR: SSH private key is not readable: ${SSH_KEY}"
+    exit 1
+fi
+
+echo "[1/8] Checking Worker services..."
+
+for service_name in kubelet containerd
+do
+    if [ "$(systemctl is-active "${service_name}")" != "active" ]; then
+        echo "ERROR: service is not active: ${service_name}"
+        exit 1
+    fi
+
+    echo "${service_name}: active"
+done
+
+echo "[2/8] Collecting Worker metadata..."
+
+hostnamectl >"${METADATA_DIR}/hostnamectl.txt" 2>&1 || true
+uname -a >"${METADATA_DIR}/kernel.txt"
+cat /etc/os-release >"${METADATA_DIR}/os-release.txt"
+
+systemctl status kubelet --no-pager \
+  >"${METADATA_DIR}/kubelet-status.txt" 2>&1 || true
+
+systemctl status containerd --no-pager \
+  >"${METADATA_DIR}/containerd-status.txt" 2>&1 || true
+
+systemctl cat kubelet \
+  >"${METADATA_DIR}/kubelet-systemd.txt" 2>&1 || true
+
+systemctl cat containerd \
+  >"${METADATA_DIR}/containerd-systemd.txt" 2>&1 || true
+
+journalctl -u kubelet --since "24 hours ago" --no-pager \
+  >"${METADATA_DIR}/kubelet-journal.txt" 2>&1 || true
+
+journalctl -u containerd --since "24 hours ago" --no-pager \
+  >"${METADATA_DIR}/containerd-journal.txt" 2>&1 || true
+
+kubelet --version \
+  >"${METADATA_DIR}/kubelet-version.txt" 2>&1 || true
+
+kubeadm version \
+  >"${METADATA_DIR}/kubeadm-version.txt" 2>&1 || true
+
+containerd --version \
+  >"${METADATA_DIR}/containerd-version.txt" 2>&1 || true
+
+crictl info \
+  >"${METADATA_DIR}/crictl-info.txt" 2>&1 || true
+
+crictl pods \
+  >"${METADATA_DIR}/crictl-pods.txt" 2>&1 || true
+
+crictl ps -a \
+  >"${METADATA_DIR}/crictl-containers.txt" 2>&1 || true
+
+crictl images \
+  >"${METADATA_DIR}/crictl-images.txt" 2>&1 || true
+
+ip address show \
+  >"${METADATA_DIR}/ip-address.txt" 2>&1 || true
+
+ip route show \
+  >"${METADATA_DIR}/ip-route.txt" 2>&1 || true
+
+mount \
+  >"${METADATA_DIR}/mounts.txt" 2>&1 || true
+
+df -hT \
+  >"${METADATA_DIR}/filesystem.txt" 2>&1 || true
+
+rpm -qa | sort \
+  >"${METADATA_DIR}/installed-packages.txt" 2>&1 || true
+
+echo "[3/8] Selecting Worker backup paths..."
+
+BACKUP_PATHS=()
+BACKUP_PATH_COUNT=0
+
+{% for path in (k8s_worker_backup_paths | default([])) + (k8s_worker_persistent_data_paths | default([])) %}
+if [ -e "{{ path }}" ]; then
+    BACKUP_PATHS+=("{{ path | regex_replace('^/', '') }}")
+    BACKUP_PATH_COUNT=$((BACKUP_PATH_COUNT + 1))
+else
+    echo "WARNING: skipping missing path: {{ path }}"
+fi
+{% endfor %}
+
+if [ "${BACKUP_PATH_COUNT}" -eq 0 ]; then
+    echo "ERROR: none of the configured Worker backup paths exist"
+    exit 1
+fi
+
+echo "[4/8] Creating Worker configuration archive..."
+
+tar \
+  --acls \
+  --xattrs \
+  --selinux \
+  --numeric-owner \
+  --warning=no-file-changed \
+  -C / \
+  -czf "${RUN_DIR}/${CONFIG_ARCHIVE}" \
+  "${BACKUP_PATHS[@]}"
+
+if [ ! -s "${RUN_DIR}/${CONFIG_ARCHIVE}" ]; then
+    echo "ERROR: Worker configuration archive is empty"
+    exit 1
+fi
+
+echo "[5/8] Creating metadata archive and checksums..."
+
+tar \
+  -C "${RUN_DIR}" \
+  -czf "${RUN_DIR}/${METADATA_ARCHIVE}" \
+  metadata
+
+cd "${RUN_DIR}"
+
+sha256sum "${CONFIG_ARCHIVE}" \
+  >"${CONFIG_ARCHIVE}.sha256"
+
+sha256sum "${METADATA_ARCHIVE}" \
+  >"${METADATA_ARCHIVE}.sha256"
+
+sha256sum -c "${CONFIG_ARCHIVE}.sha256"
+sha256sum -c "${METADATA_ARCHIVE}.sha256"
+
+echo "[6/8] Creating remote backup directory..."
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "mkdir -p -- '${REMOTE_DIR}'"
+
+echo "[7/8] Uploading and verifying Worker backup..."
+
+rsync \
+  -a \
+  -e "ssh -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
+  "${CONFIG_ARCHIVE}" \
+  "${CONFIG_ARCHIVE}.sha256" \
+  "${METADATA_ARCHIVE}" \
+  "${METADATA_ARCHIVE}.sha256" \
+  "${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}/"
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "cd '${REMOTE_DIR}' &&
+   sha256sum -c '${CONFIG_ARCHIVE}.sha256' &&
+   sha256sum -c '${METADATA_ARCHIVE}.sha256'"
+
+echo "[8/8] Cleaning expired local backup directories..."
+
+find "${WORK_DIR}" \
+  -mindepth 1 \
+  -maxdepth 1 \
+  -type d \
+  -name 'worker-*' \
+  -mtime "+${LOCAL_RETENTION_DAYS}" \
+  -exec rm -rf -- {} +
+
+echo "============================================================"
+echo "Kubernetes Worker backup completed successfully"
+echo "Finish time : $(date '+%F %T')"
+echo "Config      : ${CONFIG_ARCHIVE}"
+echo "Metadata    : ${METADATA_ARCHIVE}"
+echo "Remote      : ${REMOTE_DIR}"
+echo "============================================================"

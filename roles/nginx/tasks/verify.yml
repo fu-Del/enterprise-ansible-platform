@@ -1,0 +1,21 @@
+---
+- name: Wait for nginx HTTP port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ nginx_http_port }}"
+    timeout: 10
+  when: not ansible_check_mode
+
+- name: Verify nginx health endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nginx_http_port }}/health"
+    method: GET
+    status_code: 200
+    return_content: true
+  register: nginx_health
+  when: not ansible_check_mode
+
+- name: Display nginx health result
+  ansible.builtin.debug:
+    msg: "Nginx health check: {{ nginx_health.content | trim }}"
+  when: not ansible_check_mode

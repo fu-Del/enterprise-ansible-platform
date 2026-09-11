@@ -1,0 +1,57 @@
+---
+- name: Inspect Kubernetes worker join state
+  hosts: k8s_worker
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check worker kubelet configuration
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubernetes_worker_kubelet_conf
+
+    - name: Record whether worker requires joining
+      ansible.builtin.set_fact:
+        kubernetes_worker_needs_join: >-
+          {{
+            not kubernetes_worker_kubelet_conf.stat.exists
+          }}
+
+- name: Generate Kubernetes join command when required
+  hosts: k8s_master
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Determine whether any worker requires joining
+      ansible.builtin.set_fact:
+        kubernetes_join_required: >-
+          {{
+            groups['k8s_worker']
+            | map(
+                'extract',
+                hostvars,
+                'kubernetes_worker_needs_join'
+              )
+            | select('equalto', true)
+            | list
+            | length > 0
+          }}
+
+    - name: Generate worker join token
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: join_token
+      when:
+        - kubernetes_join_required | bool
+
+- name: Join Kubernetes workers
+  hosts: k8s_worker
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Join worker node
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: worker

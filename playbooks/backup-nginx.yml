@@ -1,0 +1,34 @@
+---
+- name: Configure Nginx backup client
+  hosts: web
+  become: true
+  gather_facts: true
+
+  roles:
+    - backup_client
+
+- name: Authorize node01 backup key on node06
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read node01 backup public key
+      ansible.builtin.slurp:
+        src: /root/.ssh/backup_ed25519.pub
+      delegate_to: node01
+      register: node01_backup_key
+
+    - name: Ensure backupsvc ssh directory exists
+      ansible.builtin.file:
+        path: /home/backupsvc/.ssh
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0700"
+
+    - name: Authorize node01 backup key
+      ansible.posix.authorized_key:
+        user: backupsvc
+        key: "{{ node01_backup_key.content | b64decode }}"
+        state: present

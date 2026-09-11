@@ -1,0 +1,28 @@
+---
+- name: Check whether worker has already joined
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: worker_kubelet_conf
+
+- name: Verify join command is available
+  ansible.builtin.assert:
+    that:
+      - hostvars[groups['k8s_master'][0]].kubernetes_join_command is defined
+      - hostvars[groups['k8s_master'][0]].kubernetes_join_command | length > 0
+    fail_msg: Kubernetes join command is unavailable.
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not worker_kubelet_conf.stat.exists
+
+- name: Join Kubernetes worker
+  ansible.builtin.command:
+    cmd: >-
+      {{
+        hostvars[groups['k8s_master'][0]].kubernetes_join_command
+      }}
+      --cri-socket=unix:///run/containerd/containerd.sock
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - not worker_kubelet_conf.stat.exists

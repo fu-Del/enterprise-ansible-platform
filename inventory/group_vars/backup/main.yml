@@ -1,0 +1,39 @@
+---
+# ============================================================
+# Centralized Backup Retention and Capacity Policy
+# ============================================================
+
+backup_server_root: "/backup"
+backup_server_data_dir: "/backup/data"
+backup_server_log_dir: "/backup/logs"
+backup_server_manifest_dir: "/backup/manifests"
+
+# 第一次部署必须为true。
+backup_cleanup_dry_run: false
+
+backup_retention_policies:
+  node01: 14
+  node02: 14
+  node03: 14
+  node04: 7
+  node05: 7
+
+backup_expected_nodes:
+  - node01
+  - node02
+  - node03
+  - node04
+  - node05
+
+backup_freshness_max_hours: 30
+
+backup_capacity_warning_percent: 75
+backup_capacity_critical_percent: 85
+backup_capacity_minimum_free_gb: 10
+
+backup_status_cron_minute: "5"
+
+backup_cleanup_cron_hour: "4"
+backup_cleanup_cron_minute: "0"
+
+backup_status_report_keep_days: 30

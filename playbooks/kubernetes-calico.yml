@@ -1,0 +1,11 @@
+---
+- name: Install Calico
+  hosts: k8s_master
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Install Calico
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: calico

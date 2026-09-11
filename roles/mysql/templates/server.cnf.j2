@@ -1,0 +1,22 @@
+# ==================================================
+# Managed by Ansible
+# DO NOT EDIT MANUALLY
+# ==================================================
+
+[mysqld]
+
+bind-address = {{ mysql_bind_address }}
+port = {{ mysql_port }}
+
+datadir = {{ mysql_data_dir }}
+
+character-set-server = {{ mysql_character_set }}
+collation-server = {{ mysql_collation }}
+
+max_connections = {{ mysql_max_connections }}
+
+innodb_buffer_pool_size = {{ mysql_innodb_buffer_pool_size }}
+
+skip-name-resolve
+
+symbolic-links = 0

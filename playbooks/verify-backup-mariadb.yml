@@ -1,0 +1,71 @@
+---
+- name: Verify MariaDB backup client
+  hosts: database
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check MariaDB backup script
+      ansible.builtin.stat:
+        path: /usr/local/bin/mariadb-backup
+      register: mariadb_backup_script
+
+    - name: Verify MariaDB backup script
+      ansible.builtin.assert:
+        that:
+          - mariadb_backup_script.stat.exists
+          - mariadb_backup_script.stat.executable
+        success_msg: "MariaDB backup script is ready"
+
+    - name: Check MariaDB backup config
+      ansible.builtin.stat:
+        path: /root/.my-backup.cnf
+      register: mariadb_backup_config
+
+    - name: Verify MariaDB backup config
+      ansible.builtin.assert:
+        that:
+          - mariadb_backup_config.stat.exists
+        success_msg: "MariaDB backup client config exists"
+
+    - name: Test MariaDB backup account
+      ansible.builtin.command:
+        cmd: >
+          mariadb
+          --defaults-extra-file=/root/.my-backup.cnf
+          -e "SELECT 1;"
+      changed_when: false
+
+    - name: Test SSH connection to backup server
+      ansible.builtin.command:
+        cmd: >
+          ssh
+          -i /root/.ssh/backup_ed25519
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=accept-new
+          backupsvc@192.168.11.16
+          "echo BACKUP-SSH-OK"
+      register: mariadb_backup_ssh_test
+      changed_when: false
+      failed_when: "'BACKUP-SSH-OK' not in mariadb_backup_ssh_test.stdout"
+
+- name: Verify MariaDB backup storage
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Find MariaDB backup archives
+      ansible.builtin.find:
+        paths: /backup/data/node02
+        patterns: "node02-*.sql.gz"
+        recurse: true
+        file_type: file
+      register: mariadb_archives
+
+    - name: Verify MariaDB backup archive exists
+      ansible.builtin.assert:
+        that:
+          - mariadb_archives.matched | int > 0
+        success_msg: "MariaDB backup archives exist"
+        fail_msg: "No MariaDB backup archive found"

@@ -1,0 +1,11 @@
+---
+- name: Initialize Kubernetes control plane
+  hosts: k8s_master
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Initialize control plane
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: control_plane

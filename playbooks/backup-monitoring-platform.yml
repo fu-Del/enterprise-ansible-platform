@@ -1,0 +1,49 @@
+---
+- name: Configure monitoring platform backup client
+  hosts: monitoring
+  become: true
+  gather_facts: true
+
+  roles:
+    - backup_client
+
+- name: Authorize node05 backup client on node06
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  vars:
+    node05_backup_key_path: >-
+      {{ hostvars['node05']['backup_ssh_key_path'] }}.pub
+    node05_backup_target_dir: >-
+      {{ hostvars['node05']['backup_server_base_dir'] }}/{{ hostvars['node05']['backup_client_node_name'] }}
+
+  tasks:
+    - name: Read node05 backup public key
+      ansible.builtin.slurp:
+        src: "{{ node05_backup_key_path }}"
+      delegate_to: node05
+      register: node05_backup_public_key
+
+    - name: Ensure node05 backup target directory exists
+      ansible.builtin.file:
+        path: "{{ node05_backup_target_dir }}"
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0750"
+
+    - name: Ensure backupsvc SSH directory exists
+      ansible.builtin.file:
+        path: /home/backupsvc/.ssh
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0700"
+
+    - name: Authorize node05 backup public key
+      ansible.posix.authorized_key:
+        user: backupsvc
+        key: "{{ node05_backup_public_key.content | b64decode | trim }}"
+        state: present
+        exclusive: false

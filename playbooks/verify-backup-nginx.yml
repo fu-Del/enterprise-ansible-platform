@@ -1,0 +1,75 @@
+---
+- name: Verify Nginx backup client
+  hosts: web
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check Nginx backup script
+      ansible.builtin.stat:
+        path: /usr/local/bin/nginx-backup
+      register: nginx_backup_script
+
+    - name: Verify Nginx backup script
+      ansible.builtin.assert:
+        that:
+          - nginx_backup_script.stat.exists
+          - nginx_backup_script.stat.executable
+        success_msg: "Nginx backup script is ready"
+
+    - name: Check backup SSH private key
+      ansible.builtin.stat:
+        path: /root/.ssh/backup_ed25519
+      register: backup_key
+
+    - name: Verify backup SSH key
+      ansible.builtin.assert:
+        that:
+          - backup_key.stat.exists
+        success_msg: "Backup SSH key exists"
+
+    - name: Test SSH connection to backup server
+      ansible.builtin.command:
+        cmd: >
+          ssh
+          -i /root/.ssh/backup_ed25519
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=accept-new
+          backupsvc@192.168.11.16
+          "echo BACKUP-SSH-OK"
+      register: backup_ssh_test
+      changed_when: false
+      failed_when: "'BACKUP-SSH-OK' not in backup_ssh_test.stdout"
+
+- name: Verify node01 backup storage
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check node01 backup directory
+      ansible.builtin.stat:
+        path: /backup/data/node01
+      register: node01_backup_dir
+
+    - name: Verify node01 backup directory
+      ansible.builtin.assert:
+        that:
+          - node01_backup_dir.stat.exists
+          - node01_backup_dir.stat.isdir
+        success_msg: "node01 backup directory is ready"
+
+    - name: Find Nginx backup archives
+      ansible.builtin.find:
+        paths: /backup/data/node01
+        patterns: "node01-nginx-*.tar.gz"
+        recurse: true
+        file_type: file
+      register: nginx_backup_archives
+
+    - name: Verify at least one Nginx backup exists
+      ansible.builtin.assert:
+        that:
+          - nginx_backup_archives.matched | int > 0
+        success_msg: "Nginx backup archive exists"
+        fail_msg: "No Nginx backup archive found"

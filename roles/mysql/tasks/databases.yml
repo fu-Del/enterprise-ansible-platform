@@ -1,0 +1,9 @@
+---
+- name: Create project databases
+  ansible.mysql.mysql_db:
+    name: "{{ item }}"
+    state: present
+    encoding: "{{ mysql_character_set }}"
+    collation: "{{ mysql_collation }}"
+    login_unix_socket: "{{ mysql_socket }}"
+  loop: "{{ mysql_databases }}"

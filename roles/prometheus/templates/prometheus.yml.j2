@@ -1,0 +1,20 @@
+global:
+  scrape_interval: "{{ prometheus_scrape_interval }}"
+  evaluation_interval: "{{ prometheus_evaluation_interval }}"
+
+rule_files:
+  - "/etc/prometheus/rules/*.yml"
+
+scrape_configs:
+
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+          - "127.0.0.1:{{ prometheus_port }}"
+
+  - job_name: "node_exporter"
+    static_configs:
+      - targets:
+{% for target in node_exporter_targets %}
+          - "{{ target }}"
+{% endfor %}

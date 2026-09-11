@@ -1,0 +1,32 @@
+---
+- name: Ensure root ssh directory exists
+  ansible.builtin.file:
+    path: /root/.ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate backup SSH key
+  ansible.builtin.command:
+    cmd: >
+      ssh-keygen
+      -t ed25519
+      -f {{ backup_ssh_key_path }}
+      -N ''
+      -C backup-{{ inventory_hostname }}
+    creates: "{{ backup_ssh_key_path }}"
+
+- name: Set backup private key permissions
+  ansible.builtin.file:
+    path: "{{ backup_ssh_key_path }}"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Set backup public key permissions
+  ansible.builtin.file:
+    path: "{{ backup_ssh_key_path }}.pub"
+    owner: root
+    group: root
+    mode: "0644"

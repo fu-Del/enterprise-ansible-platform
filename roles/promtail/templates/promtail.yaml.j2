@@ -1,0 +1,41 @@
+---
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://192.168.11.15:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: system
+          host: "{{ inventory_hostname }}"
+          __path__: /var/log/*.log
+
+{% if inventory_hostname == 'node01' %}
+  - job_name: nginx-backup
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: nginx-backup
+          host: "{{ inventory_hostname }}"
+          __path__: /var/log/backup-client/*.log
+{% endif %}
+{% if inventory_hostname == 'node02' %}
+  - job_name: mariadb-backup
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: mariadb-backup
+          host: "{{ inventory_hostname }}"
+          __path__: /var/log/backup-client/*.log
+{% endif %}

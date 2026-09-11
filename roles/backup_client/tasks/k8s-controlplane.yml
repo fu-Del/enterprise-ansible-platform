@@ -1,0 +1,154 @@
+---
+- name: Validate Kubernetes backup variables
+  ansible.builtin.assert:
+    that:
+      - backup_server_host | length > 0
+      - backup_server_user | length > 0
+      - backup_server_base_dir | length > 0
+      - backup_client_node_name | length > 0
+      - backup_work_dir | length > 0
+      - backup_log_dir | length > 0
+      - backup_ssh_key_path | length > 0
+      - k8s_backup_kubeconfig | length > 0
+      - k8s_backup_paths | length > 0
+    fail_msg: "Kubernetes backup variables are incomplete"
+    success_msg: "Kubernetes backup variables are valid"
+
+- name: Check Kubernetes and etcd required files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ k8s_backup_kubeconfig }}"
+    - /etc/kubernetes/manifests/etcd.yaml
+    - /etc/kubernetes/pki/etcd/ca.crt
+    - /etc/kubernetes/pki/etcd/healthcheck-client.crt
+    - /etc/kubernetes/pki/etcd/healthcheck-client.key
+  register: k8s_backup_required_files
+
+- name: Verify Kubernetes and etcd required files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+    fail_msg: "Required file is missing: {{ item.item }}"
+    success_msg: "Required file exists: {{ item.item }}"
+  loop: "{{ k8s_backup_required_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check required backup commands
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      command -v kubectl
+      command -v ssh
+      command -v rsync
+      command -v tar
+      command -v sha256sum
+      command -v flock
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+- name: Check Kubernetes API readiness
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - "--kubeconfig={{ k8s_backup_kubeconfig }}"
+      - get
+      - "--raw=/readyz"
+  register: k8s_api_ready
+  changed_when: false
+  check_mode: false
+- name: Verify Kubernetes API readiness
+  ansible.builtin.assert:
+    that:
+      - k8s_api_ready.rc == 0
+      - "'ok' in k8s_api_ready.stdout"
+    fail_msg: "Kubernetes API is not ready"
+    success_msg: "Kubernetes API is ready"
+
+- name: Find etcd static Pod
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - "--kubeconfig={{ k8s_backup_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - pods
+      - -l
+      - component=etcd
+      - -o
+      - "jsonpath={.items[0].metadata.name}"
+  register: etcd_pod_check
+  changed_when: false
+  check_mode: false
+- name: Verify etcd Pod was found
+  ansible.builtin.assert:
+    that:
+      - etcd_pod_check.stdout | trim | length > 0
+    fail_msg: "No etcd static Pod was found"
+    success_msg: "etcd Pod found: {{ etcd_pod_check.stdout | trim }}"
+
+- name: Check etcd endpoint health
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - "--kubeconfig={{ k8s_backup_kubeconfig }}"
+      - -n
+      - kube-system
+      - exec
+      - "{{ etcd_pod_check.stdout | trim }}"
+      - --
+      - etcdctl
+      - "--endpoints=https://127.0.0.1:2379"
+      - "--cacert=/etc/kubernetes/pki/etcd/ca.crt"
+      - "--cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt"
+      - "--key=/etc/kubernetes/pki/etcd/healthcheck-client.key"
+      - endpoint
+      - health
+  register: etcd_health_check
+  changed_when: false
+  check_mode: false
+- name: Verify etcd endpoint health
+  ansible.builtin.assert:
+    that:
+      - etcd_health_check.rc == 0
+      - "'healthy' in etcd_health_check.stdout"
+    fail_msg: "etcd endpoint health check failed"
+    success_msg: "etcd endpoint is healthy"
+
+- name: Deploy Kubernetes Control Plane backup script
+  ansible.builtin.template:
+    src: k8s-controlplane-backup.sh.j2
+    dest: /usr/local/bin/k8s-controlplane-backup
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/bash -n %s
+
+- name: Configure Kubernetes backup log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/k8s-controlplane-backup
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ backup_log_dir }}/k8s-controlplane-backup.log {
+          weekly
+          rotate 8
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0600 root root
+      }
+
+- name: Configure Kubernetes Control Plane backup cron
+  ansible.builtin.cron:
+    name: Backup Kubernetes Control Plane to backup server
+    user: root
+    minute: "{{ k8s_backup_cron_minute | default('45') }}"
+    hour: "{{ k8s_backup_cron_hour | default('2') }}"
+    job: "/usr/bin/flock -n /run/lock/k8s-controlplane-backup.lock /usr/local/bin/k8s-controlplane-backup"
+    state: present

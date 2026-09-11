@@ -1,0 +1,52 @@
+---
+#- name: Verify SELinux enforcing state
+#  ansible.builtin.command:
+#  cmd: getenforce
+# register: mysql_selinux_status
+# changed_when: false
+
+#- name: Fail if SELinux is not enforcing
+# ansible.builtin.assert:
+#   that:
+#     - mysql_selinux_status.stdout == "Enforcing"
+#   fail_msg: "SELinux must remain Enforcing on database server."
+#   success_msg: "SELinux is Enforcing."
+- name: Verify SELinux enforcing state
+  ansible.builtin.command: getenforce
+  register: mysql_selinux_status
+  changed_when: false
+  check_mode: false
+
+- name: Fail if SELinux is not enforcing
+  ansible.builtin.assert:
+    that:
+      - mysql_selinux_status.stdout == "Enforcing"
+    fail_msg: SELinux must remain Enforcing on database server.
+    success_msg: SELinux is Enforcing.
+
+- name: Install MariaDB
+  ansible.builtin.import_tasks: install.yml
+
+- name: Configure MariaDB
+  ansible.builtin.import_tasks: config.yml
+
+- name: Apply MariaDB configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify MariaDB SELinux context
+  ansible.builtin.import_tasks: selinux.yml
+
+- name: Create project databases
+  ansible.builtin.import_tasks: databases.yml
+
+- name: Create database users
+  ansible.builtin.import_tasks: users.yml
+
+- name: Configure firewall
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Apply firewall changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify MariaDB
+  ansible.builtin.import_tasks: verify.yml

@@ -1,0 +1,382 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+umask 077
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+NODE="{{ backup_client_node_name }}"
+
+BACKUP_SERVER="{{ backup_server_host }}"
+BACKUP_USER="{{ backup_server_user }}"
+BACKUP_BASE="{{ backup_server_base_dir }}"
+
+WORK_DIR="{{ backup_work_dir }}"
+LOG_DIR="{{ backup_log_dir }}"
+SSH_KEY="{{ backup_ssh_key_path }}"
+LOCAL_RETENTION_DAYS="{{ backup_retention_local_days }}"
+
+PROMETHEUS_URL="{{ monitoring_backup_prometheus_url }}"
+PROMETHEUS_DATA_DIR="{{ monitoring_backup_prometheus_data_dir }}"
+
+GRAFANA_URL="{{ monitoring_backup_grafana_url }}"
+GRAFANA_DB="{{ monitoring_backup_grafana_db_path }}"
+
+LOKI_URL="{{ monitoring_backup_loki_url }}"
+LOKI_DATA_DIR="{{ monitoring_backup_loki_data_dir }}"
+LOKI_DATA_RELATIVE="{{ monitoring_backup_loki_data_dir | regex_replace('^/', '') }}"
+
+DATE="$(date '+%F')"
+TIME="$(date '+%H%M%S')"
+RUN_ID="${DATE}-${TIME}-$$"
+
+RUN_DIR="${WORK_DIR}/monitoring-${RUN_ID}"
+METADATA_DIR="${RUN_DIR}/metadata"
+REMOTE_DIR="${BACKUP_BASE}/${NODE}/${DATE}"
+LOG_FILE="${LOG_DIR}/monitoring-platform-backup.log"
+
+PROMETHEUS_ARCHIVE="${NODE}-prometheus-${DATE}-${TIME}.tar.gz"
+GRAFANA_ARCHIVE="${NODE}-grafana-${DATE}-${TIME}.db.gz"
+LOKI_ARCHIVE="${NODE}-loki-${DATE}-${TIME}.tar.gz"
+CONFIG_ARCHIVE="${NODE}-monitoring-config-${DATE}-${TIME}.tar.gz"
+METADATA_ARCHIVE="${NODE}-monitoring-metadata-${DATE}-${TIME}.tar.gz"
+
+PROMETHEUS_SNAPSHOT_DIR=""
+LOKI_STOPPED=0
+
+SSH_OPTIONS=(
+  -i "${SSH_KEY}"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=accept-new
+  -o ConnectTimeout=15
+)
+
+cleanup()
+{
+    local rc=$?
+
+    if [ "${LOKI_STOPPED}" -eq 1 ]; then
+        echo "Cleanup: restarting Loki..."
+        systemctl start loki || true
+    fi
+
+    if [ -n "${PROMETHEUS_SNAPSHOT_DIR}" ]; then
+        rm -rf -- "${PROMETHEUS_SNAPSHOT_DIR}" || true
+    fi
+
+    if [ "${rc}" -ne 0 ]; then
+        echo "ERROR: monitoring platform backup failed: ${rc}"
+        echo "Failure time: $(date '+%F %T')"
+    fi
+
+    trap - EXIT
+    exit "${rc}"
+}
+
+trap cleanup EXIT
+trap 'echo "ERROR: line ${LINENO}: ${BASH_COMMAND}"' ERR
+
+mkdir -p "${WORK_DIR}" "${LOG_DIR}" "${RUN_DIR}" "${METADATA_DIR}"
+exec >>"${LOG_FILE}" 2>&1
+
+echo
+echo "============================================================"
+echo "Monitoring and Logging Platform Backup"
+echo "============================================================"
+echo "Start time : $(date '+%F %T')"
+echo "Node       : ${NODE}"
+echo "Run dir    : ${RUN_DIR}"
+echo "Remote     : ${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}"
+echo "============================================================"
+
+for command_name in curl python3 sqlite3 tar gzip ssh rsync sha256sum
+do
+    if ! command -v "${command_name}" >/dev/null 2>&1; then
+        echo "ERROR: required command is missing: ${command_name}"
+        exit 1
+    fi
+done
+
+if [ ! -r "${SSH_KEY}" ]; then
+    echo "ERROR: SSH private key is not readable: ${SSH_KEY}"
+    exit 1
+fi
+
+echo "[1/10] Checking monitoring services..."
+
+for service_name in prometheus grafana-server loki promtail
+do
+    if [ "$(systemctl is-active "${service_name}")" != "active" ]; then
+        echo "ERROR: service is not active: ${service_name}"
+        exit 1
+    fi
+done
+
+curl -fsS "${PROMETHEUS_URL}/-/ready" >/dev/null
+curl -fsS "${GRAFANA_URL}/api/health" >/dev/null
+curl -fsS "${LOKI_URL}/ready" >/dev/null
+
+echo "[2/10] Creating Prometheus TSDB snapshot..."
+
+PROMETHEUS_RESPONSE="$(
+    curl -fsS \
+      -X POST \
+      "${PROMETHEUS_URL}/api/v1/admin/tsdb/snapshot?skip_head=false"
+)"
+
+PROMETHEUS_SNAPSHOT_NAME="$(
+    python3 -c \
+      'import json,sys; print(json.load(sys.stdin)["data"]["name"])' \
+      <<<"${PROMETHEUS_RESPONSE}"
+)"
+
+if [ -z "${PROMETHEUS_SNAPSHOT_NAME}" ]; then
+    echo "ERROR: Prometheus snapshot name is empty"
+    exit 1
+fi
+
+PROMETHEUS_SNAPSHOT_DIR="${PROMETHEUS_DATA_DIR}/snapshots/${PROMETHEUS_SNAPSHOT_NAME}"
+
+if [ ! -d "${PROMETHEUS_SNAPSHOT_DIR}" ]; then
+    echo "ERROR: Prometheus snapshot directory does not exist"
+    exit 1
+fi
+
+tar \
+  -C "${PROMETHEUS_DATA_DIR}/snapshots" \
+  -czf "${RUN_DIR}/${PROMETHEUS_ARCHIVE}" \
+  "${PROMETHEUS_SNAPSHOT_NAME}"
+
+if [ ! -s "${RUN_DIR}/${PROMETHEUS_ARCHIVE}" ]; then
+    echo "ERROR: Prometheus snapshot archive is empty"
+    exit 1
+fi
+
+rm -rf -- "${PROMETHEUS_SNAPSHOT_DIR}"
+PROMETHEUS_SNAPSHOT_DIR=""
+
+echo "[3/10] Creating Grafana SQLite backup..."
+
+if [ ! -s "${GRAFANA_DB}" ]; then
+    echo "ERROR: Grafana SQLite database is missing or empty"
+    exit 1
+fi
+
+sqlite3 "${GRAFANA_DB}" \
+  ".timeout 30000" \
+  ".backup '${RUN_DIR}/grafana.db'"
+
+if [ ! -s "${RUN_DIR}/grafana.db" ]; then
+    echo "ERROR: Grafana SQLite backup is empty"
+    exit 1
+fi
+
+gzip -9 "${RUN_DIR}/grafana.db"
+mv "${RUN_DIR}/grafana.db.gz" \
+   "${RUN_DIR}/${GRAFANA_ARCHIVE}"
+
+echo "[4/10] Creating consistent Loki data archive..."
+
+systemctl stop loki
+LOKI_STOPPED=1
+
+if systemctl is-active --quiet loki; then
+    echo "ERROR: Loki did not stop"
+    exit 1
+fi
+
+tar \
+  --acls \
+  --xattrs \
+  --selinux \
+  --numeric-owner \
+  -C / \
+  -czf "${RUN_DIR}/${LOKI_ARCHIVE}" \
+  "${LOKI_DATA_RELATIVE}"
+
+if [ ! -s "${RUN_DIR}/${LOKI_ARCHIVE}" ]; then
+    echo "ERROR: Loki archive is empty"
+    exit 1
+fi
+
+systemctl start loki
+LOKI_STOPPED=0
+
+LOKI_READY=0
+
+for attempt in $(seq 1 90)
+do
+    if curl -fsS "${LOKI_URL}/ready" >/dev/null 2>&1; then
+        LOKI_READY=1
+        break
+    fi
+
+    sleep 1
+done
+
+if [ "${LOKI_READY}" -ne 1 ]; then
+    echo "ERROR: Loki did not become ready after backup"
+    exit 1
+fi
+
+echo "[5/10] Creating monitoring configuration archive..."
+
+CONFIG_PATHS=()
+CONFIG_PATH_COUNT=0
+
+{% for path in monitoring_backup_config_paths %}
+if [ -e "{{ path }}" ]; then
+    CONFIG_PATHS+=("{{ path | regex_replace('^/', '') }}")
+    CONFIG_PATH_COUNT=$((CONFIG_PATH_COUNT + 1))
+else
+    echo "WARNING: skipping missing config path: {{ path }}"
+fi
+{% endfor %}
+
+if [ "${CONFIG_PATH_COUNT}" -eq 0 ]; then
+    echo "ERROR: no monitoring configuration paths exist"
+    exit 1
+fi
+
+tar \
+  --acls \
+  --xattrs \
+  --selinux \
+  --numeric-owner \
+  -C / \
+  -czf "${RUN_DIR}/${CONFIG_ARCHIVE}" \
+  "${CONFIG_PATHS[@]}"
+
+if [ ! -s "${RUN_DIR}/${CONFIG_ARCHIVE}" ]; then
+    echo "ERROR: monitoring configuration archive is empty"
+    exit 1
+fi
+
+echo "[6/10] Collecting monitoring metadata..."
+
+systemctl status prometheus --no-pager \
+  >"${METADATA_DIR}/prometheus-status.txt" 2>&1 || true
+
+systemctl status grafana-server --no-pager \
+  >"${METADATA_DIR}/grafana-status.txt" 2>&1 || true
+
+systemctl status loki --no-pager \
+  >"${METADATA_DIR}/loki-status.txt" 2>&1 || true
+
+systemctl status promtail --no-pager \
+  >"${METADATA_DIR}/promtail-status.txt" 2>&1 || true
+
+systemctl cat prometheus \
+  >"${METADATA_DIR}/prometheus-systemd.txt" 2>&1 || true
+
+systemctl cat grafana-server \
+  >"${METADATA_DIR}/grafana-systemd.txt" 2>&1 || true
+
+systemctl cat loki \
+  >"${METADATA_DIR}/loki-systemd.txt" 2>&1 || true
+
+systemctl cat promtail \
+  >"${METADATA_DIR}/promtail-systemd.txt" 2>&1 || true
+
+curl -fsS "${PROMETHEUS_URL}/api/v1/status/runtimeinfo" \
+  >"${METADATA_DIR}/prometheus-runtime.json" 2>&1 || true
+
+curl -fsS "${PROMETHEUS_URL}/api/v1/targets" \
+  >"${METADATA_DIR}/prometheus-targets.json" 2>&1 || true
+
+curl -fsS "${GRAFANA_URL}/api/health" \
+  >"${METADATA_DIR}/grafana-health.json" 2>&1 || true
+
+curl -fsS "${LOKI_URL}/ready" \
+  >"${METADATA_DIR}/loki-ready.txt" 2>&1 || true
+
+du -sh "${PROMETHEUS_DATA_DIR}" "${LOKI_DATA_DIR}" \
+  >"${METADATA_DIR}/data-size.txt" 2>&1 || true
+
+df -hT \
+  >"${METADATA_DIR}/filesystem.txt" 2>&1 || true
+
+rpm -qa | sort \
+  >"${METADATA_DIR}/installed-packages.txt" 2>&1 || true
+
+uname -a >"${METADATA_DIR}/kernel.txt"
+
+tar \
+  -C "${RUN_DIR}" \
+  -czf "${RUN_DIR}/${METADATA_ARCHIVE}" \
+  metadata
+
+echo "[7/10] Generating local checksums..."
+
+cd "${RUN_DIR}"
+
+BACKUP_FILES=(
+  "${PROMETHEUS_ARCHIVE}"
+  "${GRAFANA_ARCHIVE}"
+  "${LOKI_ARCHIVE}"
+  "${CONFIG_ARCHIVE}"
+  "${METADATA_ARCHIVE}"
+)
+
+UPLOAD_FILES=()
+
+for backup_file in "${BACKUP_FILES[@]}"
+do
+    if [ ! -s "${backup_file}" ]; then
+        echo "ERROR: backup file is missing or empty: ${backup_file}"
+        exit 1
+    fi
+
+    sha256sum "${backup_file}" >"${backup_file}.sha256"
+    sha256sum -c "${backup_file}.sha256"
+
+    UPLOAD_FILES+=("${backup_file}")
+    UPLOAD_FILES+=("${backup_file}.sha256")
+done
+
+echo "[8/10] Creating remote directory..."
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "mkdir -p -- '${REMOTE_DIR}'"
+
+echo "[9/10] Uploading and verifying remote backups..."
+
+rsync \
+  -a \
+  -e "ssh -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15" \
+  "${UPLOAD_FILES[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}/"
+
+REMOTE_VERIFY_COMMAND="cd '${REMOTE_DIR}'"
+
+for backup_file in "${BACKUP_FILES[@]}"
+do
+    REMOTE_VERIFY_COMMAND="${REMOTE_VERIFY_COMMAND} && sha256sum -c '${backup_file}.sha256'"
+done
+
+ssh "${SSH_OPTIONS[@]}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "${REMOTE_VERIFY_COMMAND}"
+
+echo "[10/10] Cleaning expired local backups..."
+
+find "${WORK_DIR}" \
+  -mindepth 1 \
+  -maxdepth 1 \
+  -type d \
+  -name 'monitoring-*' \
+  -mtime "+${LOCAL_RETENTION_DAYS}" \
+  -exec rm -rf -- {} +
+
+echo "============================================================"
+echo "Monitoring platform backup completed successfully"
+echo "Finish time : $(date '+%F %T')"
+echo "Prometheus  : ${PROMETHEUS_ARCHIVE}"
+echo "Grafana     : ${GRAFANA_ARCHIVE}"
+echo "Loki        : ${LOKI_ARCHIVE}"
+echo "Config      : ${CONFIG_ARCHIVE}"
+echo "Metadata    : ${METADATA_ARCHIVE}"
+echo "Remote      : ${REMOTE_DIR}"
+echo "============================================================"

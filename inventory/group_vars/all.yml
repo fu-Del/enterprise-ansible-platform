@@ -2,3 +2,17 @@
 environment_name: production
 
 company_name: Ansible Enterprise Lab
+# ============================================================
+# Phase 8D - Isolated Restore Drill
+# ============================================================
+
+restore_drill_id: "8d-20260911"
+restore_drill_root: "/var/lib/restore-drill"
+
+restore_drill_backup_host: "192.168.11.16"
+restore_drill_backup_user: "backupsvc"
+restore_drill_backup_base_dir: "/backup/data"
+restore_drill_ssh_key: "/root/.ssh/backup_ed25519"
+
+# 默认不自动删除演练文件，便于验收。
+restore_drill_cleanup_enabled: false

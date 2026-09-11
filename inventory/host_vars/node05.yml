@@ -1,0 +1,61 @@
+---
+# ============================================================
+# Monitoring and Logging Platform Backup - node05
+# ============================================================
+
+backup_monitoring_platform_enabled: true
+
+# Backup Server
+backup_server_host: "192.168.11.16"
+backup_server_user: "backupsvc"
+backup_server_base_dir: "/backup/data"
+
+# Backup Client
+backup_client_node_name: "node05"
+
+backup_work_dir: "/var/lib/backup-client"
+backup_log_dir: "/var/log/backup-client"
+backup_ssh_key_path: "/root/.ssh/backup_ed25519"
+
+backup_retention_local_days: 2
+
+# ============================================================
+# Prometheus
+# 实际数据路径来自prometheus.service
+# ============================================================
+
+monitoring_backup_prometheus_url: "http://127.0.0.1:9090"
+monitoring_backup_prometheus_data_dir: "/var/lib/prometheus"
+
+# ============================================================
+# Grafana
+# 已确认使用SQLite
+# ============================================================
+
+monitoring_backup_grafana_url: "http://127.0.0.1:3000"
+monitoring_backup_grafana_db_type: "sqlite"
+monitoring_backup_grafana_db_path: "/var/lib/grafana/grafana.db"
+
+# ============================================================
+# Loki
+# ============================================================
+
+monitoring_backup_loki_url: "http://127.0.0.1:3100"
+monitoring_backup_loki_data_dir: "/data/loki"
+
+# ============================================================
+# Monitoring Configuration
+# ============================================================
+
+monitoring_backup_config_paths:
+  - /etc/prometheus
+  - /etc/grafana
+  - /etc/loki
+  - /etc/promtail
+  - /etc/systemd/system/prometheus.service
+  - /etc/systemd/system/loki.service
+  - /etc/systemd/system/promtail.service
+
+# 每天03:15执行，避开其他节点
+monitoring_backup_cron_hour: "3"
+monitoring_backup_cron_minute: "15"

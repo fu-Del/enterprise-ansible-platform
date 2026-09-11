@@ -1,0 +1,17 @@
+---
+- name: Create web root directory
+  ansible.builtin.file:
+    path: "{{ nginx_web_root }}"
+    state: directory
+    owner: nginx
+    group: nginx
+    mode: "0755"
+
+
+- name: Deploy website index page
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: "{{ nginx_web_root }}/{{ nginx_index_file }}"
+    owner: nginx
+    group: nginx
+    mode: "0644"

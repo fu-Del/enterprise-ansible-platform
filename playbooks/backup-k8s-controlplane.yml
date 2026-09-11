@@ -1,0 +1,49 @@
+---
+- name: Configure Kubernetes Control Plane backup client
+  hosts: node03
+  become: true
+  gather_facts: true
+
+  roles:
+    - backup_client
+
+- name: Authorize node03 backup client on node06
+  hosts: backup
+  become: true
+  gather_facts: false
+
+  vars:
+    node03_backup_key_path: >-
+      {{ hostvars['node03']['backup_ssh_key_path'] }}.pub
+    node03_backup_target_dir: >-
+      {{ hostvars['node03']['backup_server_base_dir'] }}/{{ hostvars['node03']['backup_client_node_name'] }}
+
+  tasks:
+    - name: Read node03 backup public key
+      ansible.builtin.slurp:
+        src: "{{ node03_backup_key_path }}"
+      delegate_to: node03
+      register: node03_backup_public_key
+
+    - name: Ensure node03 backup target directory exists
+      ansible.builtin.file:
+        path: "{{ node03_backup_target_dir }}"
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0750"
+
+    - name: Ensure backupsvc SSH directory exists
+      ansible.builtin.file:
+        path: /home/backupsvc/.ssh
+        state: directory
+        owner: backupsvc
+        group: backupsvc
+        mode: "0700"
+
+    - name: Authorize node03 backup public key
+      ansible.posix.authorized_key:
+        user: backupsvc
+        key: "{{ node03_backup_public_key.content | b64decode | trim }}"
+        state: present
+        exclusive: false

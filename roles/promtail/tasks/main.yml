@@ -1,0 +1,54 @@
+---
+- name: Create promtail user
+  ansible.builtin.user:
+    name: promtail
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+
+- name: Install promtail binary
+  ansible.builtin.copy:
+    src: promtail-linux-amd64
+    dest: /usr/local/bin/promtail
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart promtail
+
+- name: Create promtail directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/promtail
+    - /var/lib/promtail
+
+- name: Deploy promtail config
+  ansible.builtin.template:
+    src: promtail.yaml.j2
+    dest: /etc/promtail/promtail.yaml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart promtail
+
+- name: Deploy promtail systemd service
+  ansible.builtin.template:
+    src: promtail.service.j2
+    dest: /etc/systemd/system/promtail.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart promtail
+
+- name: Enable and start promtail
+  ansible.builtin.systemd:
+    name: promtail
+    enabled: true
+    state: started
+    daemon_reload: true

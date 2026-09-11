@@ -1,0 +1,125 @@
+#!/bin/bash
+
+set -euo pipefail
+
+NODE="{{ backup_client_node_name }}"
+BACKUP_SERVER="{{ backup_server_host }}"
+BACKUP_USER="{{ backup_server_user }}"
+BACKUP_BASE="{{ backup_server_base_dir }}"
+
+WORK_DIR="{{ backup_work_dir }}"
+LOG_DIR="{{ backup_log_dir }}"
+SSH_KEY="{{ backup_ssh_key_path }}"
+MYSQL_CNF="/root/.my-backup.cnf"
+
+DATE="$(date '+%F')"
+TIME="$(date '+%H%M%S')"
+
+REMOTE_DIR="${BACKUP_BASE}/${NODE}/${DATE}"
+LOG_FILE="${LOG_DIR}/mariadb-backup.log"
+
+exec >> "${LOG_FILE}" 2>&1
+
+echo "========================================"
+echo "MariaDB backup started: $(date '+%F %T')"
+echo "Node: ${NODE}"
+echo
+
+mkdir -p "${WORK_DIR}"
+cd "${WORK_DIR}"
+
+if [ ! -f "${MYSQL_CNF}" ]; then
+    echo "ERROR: MariaDB client config not found: ${MYSQL_CNF}"
+    exit 1
+fi
+
+echo "[1/7] Checking MariaDB service..."
+
+if ! systemctl is-active --quiet mariadb; then
+    echo "ERROR: MariaDB service is not running"
+    exit 1
+fi
+
+echo "[2/7] Testing MariaDB connection..."
+
+mariadb \
+  --defaults-extra-file="${MYSQL_CNF}" \
+  -e "SELECT 1;" >/dev/null
+
+{% for db in mariadb_backup_databases %}
+echo "Backing up database: {{ db }}"
+
+DUMP_FILE="${NODE}-{{ db }}-${DATE}-${TIME}.sql.gz"
+CHECKSUM_FILE="${DUMP_FILE}.sha256"
+
+mariadb-dump \
+  --defaults-extra-file="${MYSQL_CNF}" \
+  --single-transaction \
+  --routines \
+  --triggers \
+  --events \
+  --hex-blob \
+  --databases "{{ db }}" \
+  | gzip -c > "${DUMP_FILE}"
+
+sha256sum "${DUMP_FILE}" > "${CHECKSUM_FILE}"
+{% endfor %}
+
+{% if mariadb_backup_include_mysql_system_db | default(false) %}
+echo "Backing up mysql system database..."
+
+DUMP_FILE="${NODE}-mysql-system-${DATE}-${TIME}.sql.gz"
+CHECKSUM_FILE="${DUMP_FILE}.sha256"
+
+mariadb-dump \
+  --defaults-extra-file="${MYSQL_CNF}" \
+  --single-transaction \
+  --routines \
+  --triggers \
+  --events \
+  mysql \
+  | gzip -c > "${DUMP_FILE}"
+
+sha256sum "${DUMP_FILE}" > "${CHECKSUM_FILE}"
+{% endif %}
+
+echo "[3/7] Creating remote directory..."
+
+ssh \
+  -i "${SSH_KEY}" \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "mkdir -p '${REMOTE_DIR}'"
+
+echo "[4/7] Uploading dump files..."
+
+rsync -av \
+  -e "ssh -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+  "${NODE}"-*.sql.gz \
+  "${NODE}"-*.sql.gz.sha256 \
+  "${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}/"
+
+echo "[5/7] Verifying remote checksums..."
+
+ssh \
+  -i "${SSH_KEY}" \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "cd '${REMOTE_DIR}' && sha256sum -c *.sha256"
+
+echo "[6/7] Cleaning old local backup files..."
+
+find "${WORK_DIR}" \
+  -type f \
+  \( -name "${NODE}-*.sql.gz" -o -name "${NODE}-*.sha256" \) \
+  -mtime +{{ backup_retention_local_days }} \
+  -delete
+
+echo "[7/7] Backup completed."
+
+echo
+echo "MariaDB backup completed successfully: $(date '+%F %T')"
+echo "========================================"
+echo

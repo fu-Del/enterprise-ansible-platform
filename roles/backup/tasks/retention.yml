@@ -1,0 +1,100 @@
+---
+- name: Validate backup retention policy
+  ansible.builtin.assert:
+    that:
+      - backup_server_root == "/backup"
+      - backup_server_data_dir == "/backup/data"
+      - backup_server_log_dir == "/backup/logs"
+      - backup_server_manifest_dir == "/backup/manifests"
+      - backup_retention_policies | length > 0
+      - backup_expected_nodes | length > 0
+      - backup_capacity_warning_percent | int > 0
+      - backup_capacity_critical_percent | int > backup_capacity_warning_percent | int
+      - backup_capacity_critical_percent | int < 100
+      - backup_capacity_minimum_free_gb | int > 0
+    fail_msg: "Backup retention or capacity policy is invalid"
+    success_msg: "Backup retention and capacity policy is valid"
+
+- name: Create backup maintenance directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ backup_server_data_dir }}"
+      owner: backupsvc
+      group: backupsvc
+      mode: "0750"
+    - path: "{{ backup_server_log_dir }}"
+      owner: root
+      group: backupsvc
+      mode: "0750"
+    - path: "{{ backup_server_manifest_dir }}"
+      owner: root
+      group: backupsvc
+      mode: "0750"
+
+- name: Ensure expected node backup directories exist
+  ansible.builtin.file:
+    path: "{{ backup_server_data_dir }}/{{ item }}"
+    state: directory
+    owner: backupsvc
+    group: backupsvc
+    mode: "0750"
+  loop: "{{ backup_expected_nodes }}"
+
+- name: Deploy backup retention cleanup script
+  ansible.builtin.template:
+    src: backup-retention-cleanup.sh.j2
+    dest: /usr/local/bin/backup-retention-cleanup
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/bash -n %s
+
+- name: Deploy backup status report script
+  ansible.builtin.template:
+    src: backup-status-report.sh.j2
+    dest: /usr/local/bin/backup-status-report
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/bash -n %s
+
+- name: Configure backup maintenance log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/backup-maintenance
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ backup_server_log_dir }}/backup-retention.log
+      {{ backup_server_log_dir }}/backup-status.log {
+          weekly
+          rotate 8
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0640 root backupsvc
+      }
+
+- name: Configure hourly backup status cron
+  ansible.builtin.cron:
+    name: Central backup status and capacity check
+    user: root
+    minute: "{{ backup_status_cron_minute }}"
+    hour: "*"
+    job: "/usr/bin/flock -n /run/lock/backup-status.lock /usr/local/bin/backup-status-report"
+    state: present
+
+- name: Configure daily backup cleanup cron
+  ansible.builtin.cron:
+    name: Central backup retention cleanup
+    user: root
+    minute: "{{ backup_cleanup_cron_minute }}"
+    hour: "{{ backup_cleanup_cron_hour }}"
+    job: "/usr/bin/flock -n /run/lock/backup-retention.lock /usr/local/bin/backup-retention-cleanup --apply && /usr/local/bin/backup-status-report"
+    state: "{{ (not backup_cleanup_dry_run | bool) | ternary('present', 'absent') }}"

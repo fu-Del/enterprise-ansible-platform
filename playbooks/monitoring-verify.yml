@@ -1,0 +1,45 @@
+---
+- name: Verify monitoring stack
+  hosts: monitoring
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify Prometheus service
+      ansible.builtin.command:
+        cmd: systemctl is-active prometheus
+      register: prometheus_status
+      changed_when: false
+      failed_when: prometheus_status.stdout != "active"
+
+    - name: Verify Grafana service
+      ansible.builtin.command:
+        cmd: systemctl is-active grafana-server
+      register: grafana_status
+      changed_when: false
+      failed_when: grafana_status.stdout != "active"
+
+    - name: Verify node_exporter service
+      ansible.builtin.command:
+        cmd: systemctl is-active node_exporter
+      register: node_exporter_status
+      changed_when: false
+      failed_when: node_exporter_status.stdout != "active"
+
+    - name: Verify Prometheus health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9090/-/healthy
+        status_code: 200
+      changed_when: false
+
+    - name: Verify Grafana health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/health
+        status_code: 200
+      changed_when: false
+
+    - name: Verify node_exporter health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9100/metrics
+        status_code: 200
+      changed_when: false

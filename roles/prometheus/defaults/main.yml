@@ -1,0 +1,23 @@
+---
+prometheus_version: "3.5.0"
+
+prometheus_user: prometheus
+prometheus_group: prometheus
+
+prometheus_config_dir: /etc/prometheus
+prometheus_data_dir: /var/lib/prometheus
+
+prometheus_port: 9090
+
+prometheus_retention_time: "7d"
+
+prometheus_scrape_interval: "30s"
+prometheus_evaluation_interval: "30s"
+
+node_exporter_targets:
+  - "192.168.11.11:9100"
+  - "192.168.11.12:9100"
+  - "192.168.11.13:9100"
+  - "192.168.11.14:9100"
+  - "192.168.11.15:9100"
+  - "192.168.11.16:9100"

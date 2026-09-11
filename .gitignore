@@ -1,7 +1,29 @@
+# Ansible temporary files
 *.retry
 *.log
-.vault_pass
-vault_password
+
+# Historical and editor backup files
+*.bak
+*.bak.*
+*~
 *.swp
-.idea/
-.vscode/
+*.swo
+
+# Vault password files
+.vault_pass
+.vault_pass.*
+*vault-password*
+*vault_pass*
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated reports and release evidence
+reports/
+artifacts/
+archived-configs/
+
+# Temporary files
+tmp/
+.cache/

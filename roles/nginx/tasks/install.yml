@@ -1,0 +1,12 @@
+---
+- name: Install nginx
+  ansible.builtin.dnf:
+    name: "{{ nginx_package_name }}"
+    state: present
+
+
+- name: Enable and start nginx
+  ansible.builtin.service:
+    name: "{{ nginx_service_name }}"
+    state: started
+    enabled: true

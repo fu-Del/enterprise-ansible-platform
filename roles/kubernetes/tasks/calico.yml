@@ -1,0 +1,93 @@
+---
+- name: Check whether Calico Installation already exists
+  ansible.builtin.command:
+    cmd: kubectl get installation.operator.tigera.io default
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_installation_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+- name: Check whether Tigera operator deployment exists
+  ansible.builtin.command:
+    cmd: kubectl get deployment tigera-operator -n tigera-operator
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: tigera_operator_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+- name: Show existing Calico state
+  ansible.builtin.debug:
+    msg: "Calico is already installed; skipping bootstrap manifests."
+  when:
+    - calico_installation_check.rc == 0
+    - tigera_operator_check.rc == 0
+
+- name: Install Calico bootstrap resources
+  when:
+    - calico_installation_check.rc != 0 or tigera_operator_check.rc != 0
+  block:
+
+    - name: Apply local Calico CRDs
+      ansible.builtin.command:
+        cmd: kubectl apply -f /tmp/calico-crds.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: calico_crds_apply
+      changed_when: >
+        'created' in calico_crds_apply.stdout or
+        'configured' in calico_crds_apply.stdout
+
+    - name: Apply local Tigera operator
+      ansible.builtin.command:
+        cmd: kubectl apply -f /tmp/tigera-operator.yaml
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      register: tigera_operator_apply
+      changed_when: >
+        'created' in tigera_operator_apply.stdout or
+        'configured' in tigera_operator_apply.stdout
+- name: Deploy Calico custom resources
+  ansible.builtin.template:
+    src: calico-custom-resources.yaml.j2
+    dest: /tmp/calico-custom-resources.yaml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Read current Calico Installation
+  ansible.builtin.command:
+    cmd: kubectl get installation default -o json
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: current_calico_installation
+  changed_when: false
+  check_mode: false
+- name: Parse current Calico Installation
+  ansible.builtin.set_fact:
+    current_calico: "{{ current_calico_installation.stdout | from_json }}"
+
+- name: Determine whether managed Calico settings differ
+  ansible.builtin.set_fact:
+    calico_configuration_changed: >-
+      {{
+        current_calico.spec.calicoNetwork.bgp != 'Disabled'
+        or
+        current_calico.spec.calicoNetwork.ipPools[0].cidr != kubernetes_pod_cidr
+        or
+        current_calico.spec.calicoNetwork.ipPools[0].encapsulation != 'VXLAN'
+        or
+        current_calico.spec.calicoNetwork.ipPools[0].natOutgoing != 'Enabled'
+        or
+        current_calico.spec.calicoNetwork.ipPools[0].nodeSelector != 'all()'
+      }}
+
+- name: Apply Calico custom resources when configuration changed
+  ansible.builtin.command:
+    cmd: kubectl apply -f /tmp/calico-custom-resources.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  when: calico_configuration_changed | bool
+  register: calico_custom_resources_apply
+  changed_when: true

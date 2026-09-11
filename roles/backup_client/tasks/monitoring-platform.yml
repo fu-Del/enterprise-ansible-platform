@@ -1,0 +1,148 @@
+---
+- name: Validate monitoring platform backup variables
+  ansible.builtin.assert:
+    that:
+      - backup_server_host | length > 0
+      - backup_server_user | length > 0
+      - backup_server_base_dir | length > 0
+      - backup_client_node_name | length > 0
+      - backup_work_dir | length > 0
+      - backup_log_dir | length > 0
+      - backup_ssh_key_path | length > 0
+      - monitoring_backup_prometheus_url | length > 0
+      - monitoring_backup_prometheus_data_dir | length > 0
+      - monitoring_backup_grafana_db_type == "sqlite"
+      - monitoring_backup_grafana_db_path | length > 0
+      - monitoring_backup_loki_url | length > 0
+      - monitoring_backup_loki_data_dir | length > 0
+      - monitoring_backup_config_paths | length > 0
+    fail_msg: "Monitoring platform backup variables are incomplete"
+    success_msg: "Monitoring platform backup variables are valid"
+
+- name: Install monitoring backup packages
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - sqlite
+      - rsync
+      - tar
+      - gzip
+      - openssh-clients
+      - util-linux
+      - python3
+    state: present
+
+- name: Check monitoring services
+  ansible.builtin.command:
+    cmd: "systemctl is-active {{ item }}"
+  loop:
+    - prometheus
+    - grafana-server
+    - loki
+    - promtail
+  register: monitoring_services
+  changed_when: false
+  check_mode: false
+- name: Verify monitoring services
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == "active"
+    fail_msg: "Monitoring service is not active: {{ item.item }}"
+    success_msg: "Monitoring service is active: {{ item.item }}"
+  loop: "{{ monitoring_services.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check Prometheus data directory
+  ansible.builtin.stat:
+    path: "{{ monitoring_backup_prometheus_data_dir }}"
+  register: prometheus_data_dir
+
+- name: Check Grafana SQLite database
+  ansible.builtin.stat:
+    path: "{{ monitoring_backup_grafana_db_path }}"
+  register: grafana_database
+
+- name: Check Loki data directory
+  ansible.builtin.stat:
+    path: "{{ monitoring_backup_loki_data_dir }}"
+  register: loki_data_dir
+
+- name: Verify monitoring data paths
+  ansible.builtin.assert:
+    that:
+      - prometheus_data_dir.stat.exists
+      - prometheus_data_dir.stat.isdir
+      - grafana_database.stat.exists
+      - grafana_database.stat.isreg
+      - grafana_database.stat.size | int > 0
+      - loki_data_dir.stat.exists
+      - loki_data_dir.stat.isdir
+    fail_msg: "One or more monitoring data paths are invalid"
+    success_msg: "Monitoring data paths are valid"
+
+- name: Check Prometheus Admin API flag
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      systemctl cat prometheus |
+      grep -q -- '--web.enable-admin-api'
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+- name: Check Prometheus readiness
+  ansible.builtin.uri:
+    url: "{{ monitoring_backup_prometheus_url }}/-/ready"
+    method: GET
+    return_content: true
+    status_code: 200
+
+- name: Check Grafana health
+  ansible.builtin.uri:
+    url: "{{ monitoring_backup_grafana_url }}/api/health"
+    method: GET
+    return_content: true
+    status_code: 200
+
+- name: Check Loki readiness
+  ansible.builtin.uri:
+    url: "{{ monitoring_backup_loki_url }}/ready"
+    method: GET
+    return_content: true
+    status_code: 200
+
+- name: Deploy monitoring platform backup script
+  ansible.builtin.template:
+    src: monitoring-platform-backup.sh.j2
+    dest: /usr/local/bin/monitoring-platform-backup
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/bash -n %s
+
+- name: Configure monitoring backup log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/monitoring-platform-backup
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ backup_log_dir }}/monitoring-platform-backup.log {
+          weekly
+          rotate 8
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0600 root root
+      }
+
+- name: Configure monitoring platform backup cron
+  ansible.builtin.cron:
+    name: Backup monitoring and logging platform
+    user: root
+    minute: "{{ monitoring_backup_cron_minute | default('15') }}"
+    hour: "{{ monitoring_backup_cron_hour | default('3') }}"
+    job: "/usr/bin/flock -n /run/lock/monitoring-platform-backup.lock /usr/local/bin/monitoring-platform-backup"
+    state: present

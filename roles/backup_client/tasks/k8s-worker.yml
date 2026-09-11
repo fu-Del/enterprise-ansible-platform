@@ -1,0 +1,104 @@
+---
+- name: Validate Kubernetes Worker backup variables
+  ansible.builtin.assert:
+    that:
+      - backup_server_host | length > 0
+      - backup_server_user | length > 0
+      - backup_server_base_dir | length > 0
+      - backup_client_node_name | length > 0
+      - backup_work_dir | length > 0
+      - backup_log_dir | length > 0
+      - backup_ssh_key_path | length > 0
+      - k8s_worker_backup_paths | length > 0
+    fail_msg: "Kubernetes Worker backup variables are incomplete"
+    success_msg: "Kubernetes Worker backup variables are valid"
+
+- name: Check Kubernetes Worker required files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/kubernetes/kubelet.conf
+    - /var/lib/kubelet/config.yaml
+    - /var/lib/kubelet/kubeadm-flags.env
+  register: k8s_worker_required_files
+
+- name: Verify Kubernetes Worker required files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg | default(false)
+    fail_msg: "Required Worker file is missing: {{ item.item }}"
+    success_msg: "Required Worker file exists: {{ item.item }}"
+  loop: "{{ k8s_worker_required_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check Kubernetes Worker services
+  ansible.builtin.command:
+    cmd: "systemctl is-active {{ item }}"
+  loop:
+    - kubelet
+    - containerd
+  register: k8s_worker_services
+  changed_when: false
+  check_mode: false
+- name: Verify Kubernetes Worker services
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout | trim == "active"
+    fail_msg: "Service is not active: {{ item.item }}"
+    success_msg: "Service is active: {{ item.item }}"
+  loop: "{{ k8s_worker_services.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check required Worker backup commands
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      command -v ssh
+      command -v rsync
+      command -v tar
+      command -v sha256sum
+      command -v find
+      command -v flock
+      command -v systemctl
+      command -v journalctl
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+- name: Deploy Kubernetes Worker backup script
+  ansible.builtin.template:
+    src: k8s-worker-backup.sh.j2
+    dest: /usr/local/bin/k8s-worker-backup
+    owner: root
+    group: root
+    mode: "0750"
+    validate: /usr/bin/bash -n %s
+
+- name: Configure Kubernetes Worker backup log rotation
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/k8s-worker-backup
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {{ backup_log_dir }}/k8s-worker-backup.log {
+          weekly
+          rotate 8
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0600 root root
+      }
+
+- name: Configure Kubernetes Worker backup cron
+  ansible.builtin.cron:
+    name: Backup Kubernetes Worker to backup server
+    user: root
+    minute: "{{ k8s_worker_backup_cron_minute | default('0') }}"
+    hour: "{{ k8s_worker_backup_cron_hour | default('3') }}"
+    job: "/usr/bin/flock -n /run/lock/k8s-worker-backup.lock /usr/local/bin/k8s-worker-backup"
+    state: present

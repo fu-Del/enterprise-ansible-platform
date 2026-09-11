@@ -1,0 +1,25 @@
+---
+- name: Deploy MariaDB backup client config
+  ansible.builtin.template:
+    src: my-backup.cnf.j2
+    dest: /root/.my-backup.cnf
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Deploy MariaDB backup script
+  ansible.builtin.template:
+    src: mariadb-backup.sh.j2
+    dest: /usr/local/bin/mariadb-backup
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Configure MariaDB backup cron
+  ansible.builtin.cron:
+    name: "Backup MariaDB to backup server"
+    user: root
+    minute: "30"
+    hour: "2"
+    job: "/usr/local/bin/mariadb-backup"
+    state: present

@@ -1,0 +1,8 @@
+---
+- name: Deploy central MariaDB business database
+  hosts: database
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: mysql

@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -u
+
+BACKUP_ROOT="{{ backup_root }}"
+
+echo "======================================"
+echo " Backup Server Status"
+echo "======================================"
+echo
+
+echo "[Backup Root]"
+echo "${BACKUP_ROOT}"
+echo
+
+echo "[Filesystem Usage]"
+df -h "${BACKUP_ROOT}"
+echo
+
+echo "[Backup Directories]"
+du -sh "${BACKUP_ROOT}"/data/* 2>/dev/null || true
+echo
+
+echo "[Recent Backup Files]"
+find "${BACKUP_ROOT}" -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
+  2>/dev/null | sort -r | head -20
+
+echo
+echo "======================================"

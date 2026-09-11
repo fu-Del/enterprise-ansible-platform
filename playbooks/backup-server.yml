@@ -1,0 +1,8 @@
+---
+- name: Configure centralized backup server
+  hosts: backup
+  become: true
+  gather_facts: true
+
+  roles:
+    - backup

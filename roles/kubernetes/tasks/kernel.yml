@@ -1,0 +1,51 @@
+---
+- name: Configure Kubernetes kernel modules
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      overlay
+      br_netfilter
+
+- name: Check whether overlay module is loaded
+  ansible.builtin.shell:
+    cmd: lsmod | grep '^overlay'
+  register: overlay_loaded
+  changed_when: false
+  failed_when: false
+
+- name: Load overlay kernel module
+  ansible.builtin.command:
+    cmd: modprobe overlay
+  when: overlay_loaded.rc != 0
+
+- name: Check whether br_netfilter module is loaded
+  ansible.builtin.shell:
+    cmd: lsmod | grep '^br_netfilter'
+  register: br_netfilter_loaded
+  changed_when: false
+  failed_when: false
+
+- name: Load br_netfilter kernel module
+  ansible.builtin.command:
+    cmd: modprobe br_netfilter
+  when: br_netfilter_loaded.rc != 0
+
+- name: Configure Kubernetes sysctl parameters
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+  register: kubernetes_sysctl
+
+- name: Apply Kubernetes sysctl parameters
+  ansible.builtin.command:
+    cmd: sysctl --system
+  when: kubernetes_sysctl.changed

@@ -1,0 +1,14 @@
+---
+- name: Ensure SELinux is enforcing at runtime
+  ansible.builtin.command:
+    cmd: setenforce 1
+  when:
+    - ansible_selinux.status == "enabled"
+    - ansible_selinux.mode != "enforcing"
+  changed_when: true
+
+- name: Ensure SELinux enforcing after reboot
+  ansible.builtin.lineinfile:
+    path: /etc/selinux/config
+    regexp: '^SELINUX='
+    line: 'SELINUX=enforcing'

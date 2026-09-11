@@ -1,0 +1,23 @@
+---
+# Kubernetes
+kubernetes_version_minor: "v1.37"
+
+kubernetes_api_address: "192.168.11.13"
+kubernetes_api_port: 6443
+
+# Cluster network
+kubernetes_pod_cidr: "10.244.0.0/16"
+kubernetes_service_cidr: "10.96.0.0/12"
+
+# Container runtime
+containerd_service_name: containerd
+containerd_socket: unix:///run/containerd/containerd.sock
+
+# Cgroup
+containerd_systemd_cgroup: true
+
+# Calico
+calico_version: "v3.32.2"
+
+# kubeconfig
+kubernetes_admin_user: devops

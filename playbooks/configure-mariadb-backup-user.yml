@@ -1,0 +1,16 @@
+---
+- name: Configure MariaDB backup user
+  hosts: database
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create MariaDB backup user
+      ansible.mysql.mysql_user:
+        name: "{{ mariadb_backup_user }}"
+        password: "{{ mariadb_backup_password }}"
+        host: localhost
+        priv: "*.*:SELECT,SHOW VIEW,TRIGGER,EVENT,LOCK TABLES"
+        state: present
+        login_unix_socket: /var/lib/mysql/mysql.sock
+      no_log: true

@@ -1,0 +1,9 @@
+---
+
+- import_playbook: loki.yml
+
+
+- import_playbook: promtail.yml
+
+
+- import_playbook: grafana.yml

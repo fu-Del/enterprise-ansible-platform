@@ -1,0 +1,25 @@
+---
+- name: Check firewalld status
+  ansible.builtin.command:
+    cmd: systemctl is-active firewalld
+  register: mysql_firewalld_status
+  changed_when: false
+  failed_when: false
+
+- name: Check whether MySQL firewall service is already enabled
+  ansible.builtin.command:
+    cmd: firewall-cmd --permanent --query-service=mysql
+  register: mysql_firewall_query
+  changed_when: false
+  failed_when: false
+  when:
+    - mysql_firewalld_status.rc == 0
+
+- name: Enable MySQL service in firewalld
+  ansible.builtin.command:
+    cmd: firewall-cmd --permanent --add-service=mysql
+  when:
+    - mysql_firewalld_status.rc == 0
+    - mysql_firewall_query.rc != 0
+  notify:
+    - Reload firewalld

@@ -1,0 +1,14 @@
+---
+- name: Install MariaDB server, client and Python driver
+  ansible.builtin.dnf:
+    name:
+      - "{{ mysql_server_package }}"
+      - "{{ mysql_client_package }}"
+      - "{{ mysql_python_package }}"
+    state: present
+
+- name: Enable and start MariaDB
+  ansible.builtin.service:
+    name: "{{ mysql_service_name }}"
+    state: started
+    enabled: true

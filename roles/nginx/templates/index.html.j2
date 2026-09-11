@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ web_application_name }}</title>
+</head>
+<body>
+
+<h1>{{ web_application_name }}</h1>
+
+<p>Environment: {{ web_environment | default('production') }}</p>
+
+<p>Web Server: {{ inventory_hostname }}</p>
+
+<p>IP Address: {{ ansible_default_ipv4.address }}</p>
+
+<p>Database Server: {{ web_backend_database_host }}:{{ web_backend_database_port }}</p>
+
+<p>Managed by Ansible</p>
+
+</body>
+</html>

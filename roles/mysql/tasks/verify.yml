@@ -1,0 +1,32 @@
+---
+- name: Wait for MariaDB port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ mysql_port }}"
+    timeout: 20
+
+- name: Verify MariaDB service
+  ansible.builtin.command:
+    cmd: systemctl is-active mariadb
+  register: mysql_service_status
+  changed_when: false
+
+- name: Query MariaDB version
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    query: "SELECT VERSION() AS version;"
+  register: mysql_version_result
+
+- name: Display MariaDB version
+  ansible.builtin.debug:
+    var: mysql_version_result.query_result
+
+- name: Query database list
+  ansible.mysql.mysql_query:
+    login_unix_socket: /var/lib/mysql/mysql.sock
+    query: "SHOW DATABASES;"
+  register: mysql_database_list
+
+- name: Display database list
+  ansible.builtin.debug:
+    var: mysql_database_list.query_result

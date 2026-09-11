@@ -1,0 +1,14 @@
+---
+- name: Test containerd role
+  hosts: k8s
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Configure containerd
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: containerd
+
+    - name: Apply handlers
+      ansible.builtin.meta: flush_handlers

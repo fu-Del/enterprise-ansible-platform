@@ -1,0 +1,118 @@
+---
+- name: Install backup packages
+  ansible.builtin.dnf:
+    name:
+      - rsync
+      - tar
+      - gzip
+      - xz
+      - openssh-clients
+      - cronie
+    state: present
+
+- name: Create backup group
+  ansible.builtin.group:
+    name: "{{ backup_group }}"
+    system: true
+    state: present
+
+- name: Create backup service user
+  ansible.builtin.user:
+    name: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    system: true
+    create_home: true
+    home: "/home/{{ backup_user }}"
+    shell: /bin/bash
+    state: present
+
+- name: Create backup root directory
+  ansible.builtin.file:
+    path: "{{ backup_root }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: "0750"
+
+- name: Create backup infrastructure directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: /backup/data
+      owner: backupsvc
+      group: backupsvc
+      mode: "0750"
+
+    - path: /backup/logs
+      owner: root
+      group: backupsvc
+      mode: "0750"
+
+    - path: /backup/tmp
+      owner: backupsvc
+      group: backupsvc
+      mode: "0750"
+
+    - path: /backup/reports
+      owner: backupsvc
+      group: backupsvc
+      mode: "0750"
+
+    - path: /backup/manifests
+      owner: root
+      group: backupsvc
+      mode: "0750"
+
+    - path: /backup/metadata
+      owner: backupsvc
+      group: backupsvc
+      mode: "0750"
+- name: Create per-node backup directories
+  ansible.builtin.file:
+    path: "{{ backup_data_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ backup_user }}"
+    group: "{{ backup_group }}"
+    mode: "0750"
+  loop: "{{ backup_nodes }}"
+
+- name: Ensure cron service is enabled and started
+  ansible.builtin.systemd:
+    name: crond
+    enabled: true
+    state: started
+- name: Deploy backup configuration
+  ansible.builtin.template:
+    src: backup.conf.j2
+    dest: /etc/backup.conf
+    owner: root
+    group: root
+    mode: "0644"
+- name: Deploy backup status script
+  ansible.builtin.template:
+    src: backup-status.sh.j2
+    dest: /usr/local/bin/backup-status
+    owner: root
+    group: root
+    mode: "0755"
+- name: Deploy backup cleanup script
+  ansible.builtin.template:
+    src: backup-cleanup.sh.j2
+    dest: /usr/local/bin/backup-cleanup
+    owner: root
+    group: root
+    mode: "0755"
+- name: Configure backup cleanup cron
+  ansible.builtin.cron:
+    name: "Cleanup backup temporary files"
+    user: root
+    minute: "30"
+    hour: "3"
+    job: "/usr/local/bin/backup-cleanup"
+    state: present
+- name: Include centralized retention and status tasks
+  ansible.builtin.include_tasks: retention.yml

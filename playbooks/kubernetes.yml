@@ -1,0 +1,6 @@
+---
+- import_playbook: kubernetes-prepare.yml
+- import_playbook: kubernetes-control-plane.yml
+- import_playbook: kubernetes-calico.yml
+- import_playbook: kubernetes-worker.yml
+- import_playbook: kubernetes-verify.yml

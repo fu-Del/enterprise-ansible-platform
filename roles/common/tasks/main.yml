@@ -1,5 +1,3 @@
-
-# tasks file for roles/common
 ---
 - name: Configure common packages
   ansible.builtin.import_tasks: packages.yml
@@ -24,3 +22,5 @@
 
 - name: Configure login banner
   ansible.builtin.import_tasks: banner.yml
+- name: Configure SELinux
+  ansible.builtin.import_tasks: selinux.yml

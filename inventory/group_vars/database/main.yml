@@ -1,0 +1,13 @@
+---
+database_role: central_business_database
+mysql_bind_address: "0.0.0.0"
+mysql_data_dir: /var/lib/mysql
+
+mysql_backup_dir: /data/mysql-backup
+mysql_webapp_password: "{{ vault_mysql_webapp_password }}"
+mysql_appuser_password: "{{ vault_mysql_appuser_password }}"
+mysql_automation_password: "{{ vault_mysql_automation_password }}"
+mysql_monitor_password: "{{ vault_mysql_monitor_password }}"
+mysql_backup_password: "{{ vault_mysql_backup_password }}"
+mariadb_backup_user: "{{ vault_mariadb_backup_user }}"
+mariadb_backup_password: "{{ vault_mariadb_backup_password }}"

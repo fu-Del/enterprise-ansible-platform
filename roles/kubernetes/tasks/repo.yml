@@ -1,0 +1,21 @@
+---
+- name: Deploy Kubernetes repository
+  ansible.builtin.template:
+    src: kubernetes.repo.j2
+    dest: /etc/yum.repos.d/kubernetes.repo
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Check Kubernetes repository availability
+  ansible.builtin.command:
+    cmd: >
+      dnf makecache
+      --disablerepo=*
+      --enablerepo=kubernetes
+      --setopt=timeout=60
+      --setopt=minrate=1
+      --setopt=retries=3
+  register: kubernetes_repo_check
+  changed_when: false
+  failed_when: false

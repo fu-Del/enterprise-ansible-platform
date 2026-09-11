@@ -1,0 +1,24 @@
+---
+kubernetes_api_address: "192.168.11.13"
+
+kubernetes_pod_cidr: "10.244.0.0/16"
+kubernetes_service_cidr: "10.96.0.0/12"
+
+kubernetes_control_plane_hostname: node03
+kubernetes_worker_hostname: node04
+
+database_server: "192.168.11.12"
+database_port: 3306
+database_name: app_db
+database_user: appuser
+
+kubernetes_proxy_url: "http://192.168.11.1:7897"
+
+kubernetes_no_proxy: >-
+  127.0.0.1,
+  localhost,
+  192.168.11.0/24,
+  10.244.0.0/16,
+  10.96.0.0/12,
+  .svc,
+  .cluster.local

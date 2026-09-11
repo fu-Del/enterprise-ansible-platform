@@ -1,0 +1,8 @@
+---
+- name: Restart mariadb
+  ansible.builtin.service:
+    name: "{{ mysql_service_name }}"
+    state: restarted
+- name: Reload firewalld
+  ansible.builtin.command:
+    cmd: firewall-cmd --reload

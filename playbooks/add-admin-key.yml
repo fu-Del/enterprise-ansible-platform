@@ -1,0 +1,24 @@
+---
+- name: Deploy administrator SSH public key
+  hosts: allservers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure devops SSH directory exists
+      ansible.builtin.file:
+        path: /home/devops/.ssh
+        state: directory
+        owner: devops
+        group: devops
+        mode: "0700"
+
+    - name: Add MobaXterm administrator public key
+      ansible.builtin.lineinfile:
+        path: /home/devops/.ssh/authorized_keys
+        line: "{{ lookup('ansible.builtin.file', '/data/ansible-project/files/admin_mobaxterm.pub') }}"
+        create: true
+        owner: devops
+        group: devops
+        mode: "0600"
+        state: present

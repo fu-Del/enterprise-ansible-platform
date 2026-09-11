@@ -1,0 +1,15 @@
+---
+- name: Install nginx
+  ansible.builtin.import_tasks: install.yml
+
+- name: Configure nginx
+  ansible.builtin.import_tasks: config.yml
+
+- name: Configure web content
+  ansible.builtin.import_tasks: webroot.yml
+
+- name: Configure firewall
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Verify nginx service
+  ansible.builtin.import_tasks: verify.yml

@@ -1,0 +1,12 @@
+---
+
+- name: Deploy Promtail
+
+  hosts: log_clients
+
+  become: true
+
+
+  roles:
+
+    - promtail

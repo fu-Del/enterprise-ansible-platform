@@ -1,0 +1,105 @@
+#!/bin/bash
+
+set -euo pipefail
+
+NODE="{{ backup_client_node_name }}"
+BACKUP_SERVER="{{ backup_server_host }}"
+BACKUP_USER="{{ backup_server_user }}"
+BACKUP_BASE="{{ backup_server_base_dir }}"
+
+WORK_DIR="{{ backup_work_dir }}"
+LOG_DIR="{{ backup_log_dir }}"
+SSH_KEY="{{ backup_ssh_key_path }}"
+
+DATE="$(date '+%F')"
+TIME="$(date '+%H%M%S')"
+
+ARCHIVE="${NODE}-nginx-${DATE}-${TIME}.tar.gz"
+CHECKSUM="${ARCHIVE}.sha256"
+
+REMOTE_DIR="${BACKUP_BASE}/${NODE}/${DATE}"
+
+LOG_FILE="${LOG_DIR}/nginx-backup.log"
+
+exec >> "${LOG_FILE}" 2>&1
+
+echo "========================================"
+echo "Backup started: $(date '+%F %T')"
+echo "Node: ${NODE}"
+echo "Remote: ${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}"
+echo
+
+mkdir -p "${WORK_DIR}"
+
+cd "${WORK_DIR}"
+
+echo "[1/6] Checking backup source paths..."
+
+{% for path in nginx_backup_paths %}
+if [ ! -e "{{ path }}" ]; then
+    echo "ERROR: backup source not found: {{ path }}"
+    exit 1
+fi
+{% endfor %}
+
+{% for path in nginx_site_paths %}
+if [ ! -e "{{ path }}" ]; then
+    echo "ERROR: website path not found: {{ path }}"
+    exit 1
+fi
+{% endfor %}
+
+echo "[2/6] Creating archive..."
+
+tar -czf "${ARCHIVE}" \
+{% for path in nginx_backup_paths %}
+  {{ path }} \
+{% endfor %}
+{% for path in nginx_site_paths %}
+  {{ path }} \
+{% endfor %}
+
+echo "[3/6] Creating SHA256 checksum..."
+
+sha256sum "${ARCHIVE}" > "${CHECKSUM}"
+
+echo "[4/6] Creating remote backup directory..."
+
+ssh \
+  -i "${SSH_KEY}" \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "mkdir -p '${REMOTE_DIR}'"
+
+echo "[5/6] Uploading backup files..."
+
+rsync -av \
+  -e "ssh -i ${SSH_KEY} -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+  "${ARCHIVE}" \
+  "${CHECKSUM}" \
+  "${BACKUP_USER}@${BACKUP_SERVER}:${REMOTE_DIR}/"
+
+echo "[6/6] Verifying remote checksum..."
+
+ssh \
+  -i "${SSH_KEY}" \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new \
+  "${BACKUP_USER}@${BACKUP_SERVER}" \
+  "cd '${REMOTE_DIR}' && sha256sum -c '${CHECKSUM}'"
+
+echo
+echo "Cleaning local backup files older than {{ backup_retention_local_days }} days..."
+
+find "${WORK_DIR}" \
+  -type f \
+  -mtime +{{ backup_retention_local_days }} \
+  -delete
+
+echo
+echo "Backup completed successfully: $(date '+%F %T')"
+echo "Archive: ${ARCHIVE}"
+echo "Checksum: ${CHECKSUM}"
+echo "========================================"
+echo

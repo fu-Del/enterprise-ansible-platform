@@ -1,0 +1,202 @@
+#!/bin/bash
+
+set -uo pipefail
+umask 027
+shopt -s nullglob
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+DATA_DIR="{{ backup_server_data_dir }}"
+LOG_DIR="{{ backup_server_log_dir }}"
+MANIFEST_DIR="{{ backup_server_manifest_dir }}"
+
+LOG_FILE="${LOG_DIR}/backup-status.log"
+CURRENT_REPORT="${MANIFEST_DIR}/backup-status-current.txt"
+CAPACITY_FLAG="${MANIFEST_DIR}/BACKUP_CAPACITY_CRITICAL"
+
+WARNING_PERCENT="{{ backup_capacity_warning_percent }}"
+CRITICAL_PERCENT="{{ backup_capacity_critical_percent }}"
+MINIMUM_FREE_GB="{{ backup_capacity_minimum_free_gb }}"
+FRESHNESS_HOURS="{{ backup_freshness_max_hours }}"
+REPORT_KEEP_DAYS="{{ backup_status_report_keep_days }}"
+
+NOW_EPOCH="$(date +%s)"
+REPORT_TIME="$(date '+%F %T')"
+REPORT_ID="$(date '+%F-%H%M%S')"
+ARCHIVE_REPORT="${MANIFEST_DIR}/backup-status-${REPORT_ID}.txt"
+REPORT_TMP="$(mktemp "${MANIFEST_DIR}/.backup-status.XXXXXX")"
+
+OVERALL_STATUS="OK"
+
+cleanup()
+{
+    rm -f -- "${REPORT_TMP}"
+}
+
+trap cleanup EXIT
+
+mkdir -p "${LOG_DIR}" "${MANIFEST_DIR}"
+touch "${LOG_FILE}"
+chmod 0640 "${LOG_FILE}"
+chown root:backupsvc "${LOG_FILE}"
+
+USED_PERCENT="$(
+    df -P "${DATA_DIR}" |
+    awk 'NR == 2 {gsub(/%/, "", $5); print $5}'
+)"
+
+AVAILABLE_KB="$(
+    df -Pk "${DATA_DIR}" |
+    awk 'NR == 2 {print $4}'
+)"
+
+AVAILABLE_GB="$((AVAILABLE_KB / 1024 / 1024))"
+
+CAPACITY_STATUS="OK"
+
+if [ "${USED_PERCENT}" -ge "${CRITICAL_PERCENT}" ] ||
+   [ "${AVAILABLE_GB}" -lt "${MINIMUM_FREE_GB}" ]; then
+    CAPACITY_STATUS="CRITICAL"
+    OVERALL_STATUS="CRITICAL"
+
+    {
+        echo "Backup capacity is critical"
+        echo "Time: ${REPORT_TIME}"
+        echo "Used: ${USED_PERCENT}%"
+        echo "Available: ${AVAILABLE_GB} GB"
+    } >"${CAPACITY_FLAG}"
+
+    chown root:backupsvc "${CAPACITY_FLAG}"
+    chmod 0640 "${CAPACITY_FLAG}"
+
+elif [ "${USED_PERCENT}" -ge "${WARNING_PERCENT}" ]; then
+    CAPACITY_STATUS="WARNING"
+
+    if [ "${OVERALL_STATUS}" = "OK" ]; then
+        OVERALL_STATUS="WARNING"
+    fi
+
+    rm -f -- "${CAPACITY_FLAG}"
+else
+    rm -f -- "${CAPACITY_FLAG}"
+fi
+
+{
+    echo "============================================================"
+    echo "Central Backup Status Report"
+    echo "============================================================"
+    echo "Report time      : ${REPORT_TIME}"
+    echo "Data directory   : ${DATA_DIR}"
+    echo "Capacity status  : ${CAPACITY_STATUS}"
+    echo "Used percentage  : ${USED_PERCENT}%"
+    echo "Available space  : ${AVAILABLE_GB} GB"
+    echo "Freshness limit  : ${FRESHNESS_HOURS} hours"
+    echo
+
+{% for node_name in backup_expected_nodes %}
+    NODE_NAME="{{ node_name }}"
+    NODE_DIR="${DATA_DIR}/${NODE_NAME}"
+
+    echo "------------------------------------------------------------"
+    echo "Node: ${NODE_NAME}"
+
+    if [ ! -d "${NODE_DIR}" ]; then
+        echo "Status     : MISSING"
+        echo "Reason     : node backup directory does not exist"
+        OVERALL_STATUS="CRITICAL"
+    else
+        LATEST_DIR="$(
+            find "${NODE_DIR}" \
+              -mindepth 1 \
+              -maxdepth 1 \
+              -type d \
+              -printf '%f\n' |
+            grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' |
+            sort |
+            tail -1
+        )"
+
+        if [ -z "${LATEST_DIR}" ]; then
+            echo "Status     : MISSING"
+            echo "Reason     : no date backup directory exists"
+            OVERALL_STATUS="CRITICAL"
+        else
+            LATEST_PATH="${NODE_DIR}/${LATEST_DIR}"
+            LATEST_EPOCH="$(date -d "${LATEST_DIR} 00:00:00" +%s 2>/dev/null || echo 0)"
+            AGE_HOURS="$(((NOW_EPOCH - LATEST_EPOCH) / 3600))"
+
+            CHECKSUM_FILES=("${LATEST_PATH}"/*.sha256)
+            CHECKSUM_COUNT=0
+
+            for checksum_file in "${CHECKSUM_FILES[@]}"
+            do
+                CHECKSUM_COUNT=$((CHECKSUM_COUNT + 1))
+            done
+
+            echo "Latest date: ${LATEST_DIR}"
+            echo "Age hours  : ${AGE_HOURS}"
+            echo "Size       : $(du -sh "${LATEST_PATH}" | awk '{print $1}')"
+            echo "Files      : $(find "${LATEST_PATH}" -maxdepth 1 -type f | wc -l)"
+            echo "Checksums  : ${CHECKSUM_COUNT}"
+
+            NODE_STATUS="OK"
+
+            if [ "${AGE_HOURS}" -gt "${FRESHNESS_HOURS}" ]; then
+                NODE_STATUS="STALE"
+                OVERALL_STATUS="CRITICAL"
+            fi
+
+            if [ "${CHECKSUM_COUNT}" -eq 0 ]; then
+                NODE_STATUS="NO_CHECKSUM"
+                OVERALL_STATUS="CRITICAL"
+            else
+                CHECKSUM_OK=1
+
+                for checksum_file in "${CHECKSUM_FILES[@]}"
+                do
+                    if ! (
+                        cd "${LATEST_PATH}" &&
+                        sha256sum -c "$(basename "${checksum_file}")"
+                    ); then
+                        CHECKSUM_OK=0
+                    fi
+                done
+
+                if [ "${CHECKSUM_OK}" -ne 1 ]; then
+                    NODE_STATUS="CHECKSUM_FAILED"
+                    OVERALL_STATUS="CRITICAL"
+                fi
+            fi
+	    echo "Status     : ${NODE_STATUS}"
+        fi
+    fi
+    echo
+{% endfor %}
+
+    echo
+    echo "============================================================"
+    echo "Overall status: ${OVERALL_STATUS}"
+    echo "============================================================"
+} >"${REPORT_TMP}"
+
+chown root:backupsvc "${REPORT_TMP}"
+chmod 0640 "${REPORT_TMP}"
+
+mv -f -- "${REPORT_TMP}" "${CURRENT_REPORT}"
+cp -p -- "${CURRENT_REPORT}" "${ARCHIVE_REPORT}"
+
+cat "${CURRENT_REPORT}" >>"${LOG_FILE}"
+
+find "${MANIFEST_DIR}" \
+  -maxdepth 1 \
+  -type f \
+  -name 'backup-status-*.txt' \
+  -mtime "+${REPORT_KEEP_DAYS}" \
+  -delete
+
+if [ "${OVERALL_STATUS}" = "CRITICAL" ]; then
+    exit 2
+fi
+
+exit 0

@@ -1,0 +1,84 @@
+---
+# =============================================
+# node01 Web
+# =============================================
+
+- name: Create web application database user
+  ansible.mysql.mysql_user:
+    name: webapp
+    password: "{{ mysql_webapp_password }}"
+    host: "192.168.11.11"
+    priv: "web_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true
+
+# =============================================
+# node03 Kubernetes
+# =============================================
+
+- name: Create application user for node03
+  ansible.mysql.mysql_user:
+    name: appuser
+    password: "{{ mysql_appuser_password }}"
+    host: "192.168.11.13"
+    priv: "app_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true
+
+# =============================================
+# node04 Kubernetes
+# =============================================
+
+- name: Create application user for node04
+  ansible.mysql.mysql_user:
+    name: appuser
+    password: "{{ mysql_appuser_password }}"
+    host: "192.168.11.14"
+    priv: "app_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true
+
+# =============================================
+# master01 automation
+# =============================================
+
+- name: Create automation database user
+  ansible.mysql.mysql_user:
+    name: automation
+    password: "{{ mysql_automation_password }}"
+    host: "192.168.11.10"
+    priv: "automation_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true
+
+# =============================================
+# node05 monitor metadata
+# =============================================
+
+- name: Create monitor metadata database user
+  ansible.mysql.mysql_user:
+    name: monitor_meta
+    password: "{{ mysql_monitor_password }}"
+    host: "192.168.11.15"
+    priv: "monitor_meta_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true
+
+# =============================================
+# node06 backup metadata
+# =============================================
+
+- name: Create backup metadata database user
+  ansible.mysql.mysql_user:
+    name: backup_meta
+    password: "{{ mysql_backup_password }}"
+    host: "192.168.11.16"
+    priv: "backup_meta_db.*:ALL"
+    state: present
+    login_unix_socket: /var/lib/mysql/mysql.sock
+  no_log: true

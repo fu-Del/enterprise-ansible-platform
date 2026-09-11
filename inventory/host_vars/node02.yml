@@ -1,0 +1,22 @@
+---
+backup_server_host: "192.168.11.16"
+backup_server_user: "backupsvc"
+backup_server_base_dir: "/backup/data"
+
+backup_client_node_name: "node02"
+
+backup_work_dir: "/var/lib/backup-client"
+backup_log_dir: "/var/log/backup-client"
+
+backup_ssh_key_path: "/root/.ssh/backup_ed25519"
+
+backup_retention_local_days: 2
+
+mariadb_backup_databases:
+  - web_db
+  - app_db
+  - automation_db
+  - monitor_meta_db
+  - backup_meta_db
+
+mariadb_backup_include_mysql_system_db: true

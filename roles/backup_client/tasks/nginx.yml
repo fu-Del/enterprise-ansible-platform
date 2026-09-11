@@ -1,0 +1,35 @@
+---
+- name: Validate Nginx backup variables
+  ansible.builtin.assert:
+    that:
+      - backup_client_node_name | length > 0
+      - backup_server_host | length > 0
+      - backup_server_user | length > 0
+      - backup_server_base_dir | length > 0
+      - backup_work_dir | length > 0
+      - backup_log_dir | length > 0
+      - backup_ssh_key_path | length > 0
+      - nginx_backup_paths | length > 0
+      - nginx_site_paths | length > 0
+    fail_msg: Nginx backup variables are incomplete.
+    success_msg: Nginx backup variables are valid.
+
+- name: Deploy Nginx backup script
+  ansible.builtin.template:
+    src: nginx-backup.sh.j2
+    dest: /usr/local/bin/nginx-backup
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Configure Nginx backup cron
+  ansible.builtin.cron:
+    name: Backup Nginx to backup server
+    user: root
+    minute: "{{ nginx_backup_cron_minute | default('15') }}"
+    hour: "{{ nginx_backup_cron_hour | default('2') }}"
+    job: >-
+      /usr/bin/flock -n
+      /run/lock/nginx-backup.lock
+      /usr/local/bin/nginx-backup
+    state: present

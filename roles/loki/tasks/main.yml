@@ -1,0 +1,41 @@
+---
+
+- name: Create loki user
+  user:
+    name: loki
+    system: true
+
+- name: Install loki binary
+  copy:
+    src: loki-linux-amd64
+    dest: /usr/local/bin/loki
+    mode: '0755'
+
+- name: Create loki directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: loki
+    group: loki
+    mode: '0755'
+  loop:
+    - /etc/loki
+    - /var/lib/loki
+
+- name: Deploy Loki config
+  template:
+    src: loki-config.yaml.j2
+    dest: /etc/loki/loki-config.yaml
+
+- name: Deploy Loki service
+  template:
+    src: loki.service.j2
+    dest: /etc/systemd/system/loki.service
+  notify:
+    - daemon reload
+
+- name: Enable Loki
+  systemd:
+    name: loki
+    enabled: true
+    state: started

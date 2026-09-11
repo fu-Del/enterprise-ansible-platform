@@ -1,0 +1,22 @@
+# defaults file for roles/nginx
+---
+nginx_package_name: nginx
+nginx_service_name: nginx
+
+nginx_user: nginx
+
+nginx_http_port: 80
+
+nginx_web_root: /var/www/enterprise-app
+
+nginx_server_name: "_"
+
+nginx_index_file: index.html
+
+web_application_name: "Enterprise Ansible Web"
+
+web_backend_database_host: 192.168.11.12
+web_backend_database_port: 3306
+
+nginx_worker_processes: auto
+nginx_worker_connections: 1024

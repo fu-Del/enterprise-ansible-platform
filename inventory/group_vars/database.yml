@@ -1,6 +1,0 @@
----
-database_role: central_business_database
-
-mysql_data_dir: /var/lib/mysql
-
-mysql_backup_dir: /data/mysql-backup

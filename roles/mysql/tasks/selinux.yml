@@ -1,0 +1,23 @@
+---
+- name: Check MariaDB data directory exists
+  ansible.builtin.stat:
+    path: "{{ mysql_data_dir }}"
+  register: mysql_data_dir_stat
+
+- name: Fail if MariaDB data directory does not exist
+  ansible.builtin.assert:
+    that:
+      - mysql_data_dir_stat.stat.exists
+      - mysql_data_dir_stat.stat.isdir
+    fail_msg: "MariaDB data directory {{ mysql_data_dir }} does not exist."
+    success_msg: "MariaDB data directory exists."
+
+- name: Check MariaDB data directory SELinux context
+  ansible.builtin.command:
+    cmd: "ls -Zd {{ mysql_data_dir }}"
+  register: mysql_selinux_context
+  changed_when: false
+
+- name: Display MariaDB SELinux context
+  ansible.builtin.debug:
+    var: mysql_selinux_context.stdout

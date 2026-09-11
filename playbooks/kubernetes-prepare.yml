@@ -1,0 +1,40 @@
+---
+- name: Prepare Kubernetes nodes
+  hosts: k8s
+  become: true
+  gather_facts: true
+  serial: 1
+
+  tasks:
+    - name: Run Kubernetes preflight checks
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: preflight
+
+    - name: Configure Kubernetes kernel
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: kernel
+
+    - name: Disable swap
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: swap
+
+    - name: Configure containerd
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: containerd
+
+    - name: Apply containerd handlers
+      ansible.builtin.meta: flush_handlers
+
+    - name: Configure Kubernetes repository
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: repo
+
+    - name: Install Kubernetes packages
+      ansible.builtin.import_role:
+        name: kubernetes
+        tasks_from: packages
