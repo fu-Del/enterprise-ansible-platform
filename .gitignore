@@ -27,3 +27,12 @@ archived-configs/
 # Temporary files
 tmp/
 .cache/
+
+# Sensitive files
+*.pem
+*.key
+.env
+.env.*
+secrets.yml
+secret.yml
+credentials.yml
