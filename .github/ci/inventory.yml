@@ -1,0 +1,53 @@
+---
+all:
+  vars:
+    ansible_connection: local
+    ansible_host: 127.0.0.1
+
+  children:
+    allservers:
+      hosts:
+        node01:
+        node02:
+        node03:
+        node04:
+        node05:
+        node06:
+
+    web:
+      hosts:
+        node01:
+
+    database:
+      hosts:
+        node02:
+
+    k8s:
+      hosts:
+        node03:
+        node04:
+
+    k8s_master:
+      hosts:
+        node03:
+
+    k8s_worker:
+      hosts:
+        node04:
+
+    monitoring:
+      hosts:
+        node05:
+
+    backup:
+      hosts:
+        node06:
+
+    log_clients:
+      hosts:
+        node01:
+        node02:
+        node03:
+        node04:
+        node05:
+        node06:
