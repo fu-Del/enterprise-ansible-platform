@@ -512,3 +512,10 @@ https://github.com/fu-Del/enterprise-ansible-platform/releases/tag/v1.0.0
 5. 在测试环境完成语法检查和check mode验证。
 6. 确认备份服务器容量和保留策略。
 7. 完成隔离恢复演练后再用于正式环境。
+
+
+### 详细架构文档
+
+- [总体平台架构](docs/architecture/platform-overview.md)
+- [监控与日志数据流](docs/architecture/monitoring-logging-flow.md)
+- [统一备份与隔离恢复流程](docs/architecture/backup-recovery-flow.md)
