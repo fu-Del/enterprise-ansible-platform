@@ -519,3 +519,10 @@ https://github.com/fu-Del/enterprise-ansible-platform/releases/tag/v1.0.0
 - [总体平台架构](docs/architecture/platform-overview.md)
 - [监控与日志数据流](docs/architecture/monitoring-logging-flow.md)
 - [统一备份与隔离恢复流程](docs/architecture/backup-recovery-flow.md)
+## 面试与演示资料
+
+- [面试资料索引](docs/interview/README.md)
+- [15分钟面试演示手册](docs/interview/demo-runbook.md)
+- [项目故障案例](docs/interview/incident-casebook.md)
+- [技术亮点说明](docs/interview/project-highlights.md)
+- [常见面试问答](docs/interview/interview-qa.md)
